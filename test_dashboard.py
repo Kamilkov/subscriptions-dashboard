@@ -1055,6 +1055,23 @@ class TestServerIntegration(unittest.TestCase):
         self.assertEqual(srv.server_address[0], "127.0.0.1")
         srv.server_close()
 
+    def test_open_antigravity_endpoint(self):
+        import dashboard
+        with mock.patch.object(dashboard.subprocess, "Popen") as popen:
+            port = self._serve()
+            req = _urlreq.Request(f"http://127.0.0.1:{port}/api/open-antigravity",
+                                  data=b"", method="POST")
+            with _urlreq.urlopen(req, timeout=10) as r:
+                self.assertEqual(r.status, 200)
+        popen.assert_called_once_with(["open", "-a", "Antigravity"])
+
+    def test_post_unknown_path_404(self):
+        port = self._serve()
+        req = _urlreq.Request(f"http://127.0.0.1:{port}/api/usage", data=b"", method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            _urlreq.urlopen(req, timeout=10)
+        self.assertEqual(cm.exception.code, 404)
+
     def test_degraded_codex_auth_other_service_survives(self):
         import dashboard
 

@@ -681,6 +681,9 @@ h1 .dim { color:var(--muted); font-weight:400; }
 .nav button { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
               color:var(--muted); font:inherit; font-size:12px; padding:3px 8px; margin-right:12px; }
 .nav button:hover { color:var(--ink); }
+.openbtn { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
+  color:var(--muted); font-size:11px; padding:1px 8px; margin-left:8px; }
+.openbtn:hover { color:var(--ink); }
 
 .group { background:var(--panel); border:1px solid var(--line); border-radius:12px;
          padding:14px 20px 16px; }
@@ -882,15 +885,20 @@ function groupLayout(items, nowSec) {
   }
   return {start: start, end: end, nowPct: clampPct((nowSec - start) / span * 100)};
 }
+function openBtn(svc, err) {  // "not running" is fixable with one click
+  if (svc !== "antigravity" || !err || err.category !== "auth") return "";
+  return ' <button type="button" class="openbtn" ' +
+         'onclick="fetch(\'/api/open-antigravity\',{method:\'POST\'})">Open Antigravity</button>';
+}
 function errorLine(svc, err) {  // service has data but is stale/errored
   const msg = err.category === "auth" ? STALE_FIX[svc]
             : "Can't reach " + svc + " (" + err.category + ")";
-  return '<p class="errline" role="alert">' + esc(msg) + '</p>';
+  return '<p class="errline" role="alert">' + esc(msg) + openBtn(svc, err) + '</p>';
 }
 function unavailLine(svc, err) {  // service has no data at all
   const msg = (err && err.category === "auth") ? STALE_FIX[svc]
             : svc + " — no data yet" + (err ? " (" + err.category + ")" : "");
-  return '<p class="unavail">' + esc(msg) + '</p>';
+  return '<p class="unavail">' + esc(msg) + openBtn(svc, err) + '</p>';
 }
 function axisRow(key, m) {
   // Rolling is hours-scale, so the marker carries the actual clock time.
@@ -1202,6 +1210,28 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/history":
                 self._send(200, "application/json", json.dumps(
                     {"lanes": weekly_utilization(), "server_time": epoch_to_iso(time.time())}).encode())
+            else:
+                self._send(404, "text/plain; charset=utf-8", b"not found")
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as e:
+            print(f"handler error: {e.__class__.__name__}: {e}", file=sys.stderr)
+            try:
+                self._send(500, "text/plain; charset=utf-8", b"internal error")
+            except Exception:
+                pass
+
+    def do_POST(self):
+        try:
+            if not self._host_ok():
+                self._send(403, "text/plain; charset=utf-8", b"forbidden")
+                return
+            if self.path == "/api/open-antigravity":
+                # Fixed action, no parameters — the endpoint can only ever do
+                # exactly what the button says. POST-only so a hostile page
+                # can't trigger it with an <img>/link GET.
+                subprocess.Popen(["open", "-a", "Antigravity"])
+                self._send(200, "text/plain; charset=utf-8", b"ok")
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found")
         except (BrokenPipeError, ConnectionResetError):

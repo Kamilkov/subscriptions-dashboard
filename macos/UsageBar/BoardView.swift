@@ -93,8 +93,11 @@ struct BoardView: View {
         VStack(alignment: .leading, spacing: s(10)) {
             header
             ForEach(errorLines(), id: \.self) { msg in
-                Label(msg, systemImage: "exclamationmark.circle")
-                    .font(.system(size: s(11))).foregroundStyle(.orange)
+                HStack(spacing: s(8)) {
+                    Label(msg, systemImage: "exclamationmark.circle")
+                        .font(.system(size: s(11))).foregroundStyle(.orange)
+                    if msg.hasPrefix("Antigravity not running") { openAntigravityButton }
+                }
             }
             ForEach(Bucket.allCases, id: \.self) { bucket in
                 if store.enabledBuckets.contains(bucket.rawValue) {
@@ -102,7 +105,10 @@ struct BoardView: View {
                 }
             }
             ForEach(unavailableLines(), id: \.self) { msg in
-                Text(msg).font(.system(size: s(11))).foregroundStyle(.secondary)
+                HStack(spacing: s(8)) {
+                    Text(msg).font(.system(size: s(11))).foregroundStyle(.secondary)
+                    if msg.hasPrefix("Antigravity not running") { openAntigravityButton }
+                }
             }
             footer
         }
@@ -372,6 +378,18 @@ struct BoardView: View {
             if let err = st.error, err.category == "auth" { return staleFix(svc) }
             return "\(svc) — no data yet" + (st.error.map { " (\($0.category))" } ?? "")
         }
+    }
+
+    private var openAntigravityButton: some View {
+        // `open -a` resolves the app by name via LaunchServices — same
+        // behavior as the web dashboard's /api/open-antigravity endpoint.
+        Button("Open Antigravity") {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            p.arguments = ["-a", "Antigravity"]
+            try? p.run()
+        }
+        .controlSize(.small).font(.system(size: s(10)))
     }
 
     private func staleFix(_ svc: String) -> String {
