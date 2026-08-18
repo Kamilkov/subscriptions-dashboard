@@ -1063,7 +1063,7 @@ class TestServerIntegration(unittest.TestCase):
                                   data=b"", method="POST")
             with _urlreq.urlopen(req, timeout=10) as r:
                 self.assertEqual(r.status, 200)
-        popen.assert_called_once_with(["open", "-a", "Antigravity"])
+        popen.assert_called_once_with(["open", "-a", "Antigravity IDE"])
 
     def test_post_unknown_path_404(self):
         port = self._serve()

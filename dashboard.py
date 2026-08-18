@@ -1230,7 +1230,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Fixed action, no parameters — the endpoint can only ever do
                 # exactly what the button says. POST-only so a hostile page
                 # can't trigger it with an <img>/link GET.
-                subprocess.Popen(["open", "-a", "Antigravity"])
+                # "Antigravity IDE", not "Antigravity" — two apps exist and
+                # only the IDE runs the language server we read usage from.
+                subprocess.Popen(["open", "-a", "Antigravity IDE"])
                 self._send(200, "text/plain; charset=utf-8", b"ok")
             else:
                 self._send(404, "text/plain; charset=utf-8", b"not found")

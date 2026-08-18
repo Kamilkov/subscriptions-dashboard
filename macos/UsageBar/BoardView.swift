@@ -386,7 +386,9 @@ struct BoardView: View {
         Button("Open Antigravity") {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            p.arguments = ["-a", "Antigravity"]
+            // "Antigravity IDE", not "Antigravity" — two apps exist and only
+            // the IDE runs the language server we read usage from.
+            p.arguments = ["-a", "Antigravity IDE"]
             try? p.run()
         }
         .controlSize(.small).font(.system(size: s(10)))
