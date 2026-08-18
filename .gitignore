@@ -1,0 +1,7 @@
+.env
+history.jsonl
+__pycache__/
+macos/UsageBar.xcodeproj/
+macos/dist/
+*.profraw
+docs/red-team-review-*.md
