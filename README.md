@@ -9,6 +9,8 @@ OVER), reset countdown, and a burn-rate projection ("runs out ~Tue 18 Aug").
 Three surfaces: the menu bar (worst lane's %), a resizable board window for a
 dedicated display, and a desktop widget.
 
+![Usage Board — rolling, weekly, and monthly lanes with pace badges and reset countdowns](docs/usage-board.jpg)
+
 **[Download the latest release](https://github.com/Kamilkov/subscriptions-dashboard/releases/latest)** —
 open the DMG, drag to Applications. Auto-updates via Sparkle. macOS 15+.
 
