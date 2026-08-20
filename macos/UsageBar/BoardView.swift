@@ -137,7 +137,7 @@ struct BoardView: View {
             footer
         }
         .padding(s(14))
-        .frame(width: isWindow ? nil : 630 * eff)
+        .frame(width: isWindow ? nil : 725 * eff)
     }
 
     private var header: some View {
