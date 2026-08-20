@@ -96,6 +96,19 @@ final class Store {
         UserDefaults.standard.set(fontScale, forKey: "fontScale")
     }
 
+    // Board background tint over the window material, one colour per
+    // appearance; hex "RRGGBB", nil = plain material (default). Mirrors the
+    // web board's bgLight/bgDark localStorage setting.
+    var boardBgLight: String? = UserDefaults.standard.string(forKey: "boardBgLight")
+    var boardBgDark: String? = UserDefaults.standard.string(forKey: "boardBgDark")
+
+    func setBoardBg(dark: Bool, hex: String?) {
+        let key = dark ? "boardBgDark" : "boardBgLight"
+        if dark { boardBgDark = hex } else { boardBgLight = hex }
+        if let hex { UserDefaults.standard.set(hex, forKey: key) }
+        else { UserDefaults.standard.removeObject(forKey: key) }
+    }
+
     // Weekly-lane grid: "window" = sevenths of the window, "midnight" = local
     // midnights (same modes and persistence key as the web board).
     var gridMode: String = UserDefaults.standard.string(forKey: "gridMode") ?? "window"

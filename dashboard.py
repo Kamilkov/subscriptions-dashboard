@@ -681,6 +681,8 @@ h1 .dim { color:var(--muted); font-weight:400; }
 .nav button { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
               color:var(--muted); font:inherit; font-size:12px; padding:3px 8px; margin-right:12px; }
 .nav button:hover { color:var(--ink); }
+.nav input[type=color] { width:22px; height:20px; padding:1px; border:1px solid var(--line);
+                         border-radius:5px; background:none; cursor:pointer; vertical-align:middle; }
 .openbtn { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
   color:var(--muted); font-size:11px; padding:1px 8px; margin-left:8px; }
 .openbtn:hover { color:var(--ink); }
@@ -787,7 +789,11 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
 <div class="wrap">
 <header>
   <h1>AI subscriptions <span class="dim">&middot; usage vs. time</span></h1>
-  <nav class="nav"><button id="gridtoggle" type="button"></button>
+  <nav class="nav">
+    <input type="color" id="bgl" title="Background — light mode">
+    <input type="color" id="bgd" title="Background — dark mode">
+    <button id="bgreset" type="button" title="Reset background colours">&#8634;</button>
+    <button id="gridtoggle" type="button"></button>
     <a href="/history">weekly utilization &rarr;</a></nav>
 </header>
 <main><div id="board"><p class="unavail">Loading&hellip;</p></div></main>
@@ -814,6 +820,30 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
 </div>
 <script>
 "use strict";
+// User-selectable page background, one colour per scheme, persisted in
+// localStorage (same origin, so / and /history share it). No stored value =
+// remove the inline override so the stylesheet default rules again.
+(function () {
+  const DEF = {light: "#f1f1f4", dark: "#151517"};   // mirror the :root --page values
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  const pick = {light: document.getElementById("bgl"), dark: document.getElementById("bgd")};
+  const key = (m) => m === "dark" ? "bgDark" : "bgLight";
+  function apply() {
+    const c = localStorage.getItem(key(mq.matches ? "dark" : "light"));
+    if (c) document.documentElement.style.setProperty("--page", c);
+    else document.documentElement.style.removeProperty("--page");
+  }
+  for (const m of ["light", "dark"]) {
+    pick[m].value = localStorage.getItem(key(m)) || DEF[m];
+    pick[m].addEventListener("input", () => { localStorage.setItem(key(m), pick[m].value); apply(); });
+  }
+  document.getElementById("bgreset").addEventListener("click", () => {
+    for (const m of ["light", "dark"]) { localStorage.removeItem(key(m)); pick[m].value = DEF[m]; }
+    apply();
+  });
+  mq.addEventListener("change", apply);
+  apply();
+})();
 const PACE = {under: "UNDER", on: "ON PACE", over: "OVER"};
 const LABELS = {session: "5-hour session", weekly_scoped: "Weekly - Opus and above", rolling: "Rolling",
                 monthly: "Monthly - included usage",
@@ -1101,6 +1131,12 @@ body { background:var(--page); color:var(--ink); font:14px/1.5 -apple-system, sy
 header { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
 h1 { font-size:18px; font-weight:700; }
 a { color:var(--use); text-decoration:none; font:12px/1 var(--mono); }
+.nav { display:flex; align-items:center; gap:8px; }
+.nav input[type=color] { width:22px; height:20px; padding:1px; border:1px solid var(--line);
+                         border-radius:5px; background:none; cursor:pointer; }
+.nav button { background:none; border:1px solid var(--line); border-radius:6px; cursor:pointer;
+              color:var(--muted); font:inherit; font-size:12px; padding:2px 7px; }
+.nav button:hover { color:var(--ink); }
 .intro { color:var(--muted); margin-bottom:22px; }
 .card { background:var(--panel); border:1px solid var(--line); border-radius:12px;
         padding:16px 18px; margin-bottom:14px; }
@@ -1133,7 +1169,12 @@ footer { color:var(--faint); font:11px/1.4 var(--mono); margin-top:18px; }
 <body>
 <header>
   <h1>Weekly utilization</h1>
-  <a href="/">&larr; live board</a>
+  <nav class="nav">
+    <input type="color" id="bgl" title="Background — light mode">
+    <input type="color" id="bgd" title="Background — dark mode">
+    <button id="bgreset" type="button" title="Reset background colours">&#8634;</button>
+    <a href="/">&larr; live board</a>
+  </nav>
 </header>
 <p class="intro">Peak usage reached in each reset window — how much of what you pay for you
 actually use. Short bars week after week mean headroom you're not touching.</p>
@@ -1141,6 +1182,29 @@ actually use. Short bars week after week mean headroom you're not touching.</p>
 <footer id="foot"></footer>
 <script>
 "use strict";
+// Same background-picker wiring as the live board; the localStorage keys are
+// shared across both pages. Edit both together.
+(function () {
+  const DEF = {light: "#f1f1f4", dark: "#151517"};   // mirror the :root --page values
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  const pick = {light: document.getElementById("bgl"), dark: document.getElementById("bgd")};
+  const key = (m) => m === "dark" ? "bgDark" : "bgLight";
+  function apply() {
+    const c = localStorage.getItem(key(mq.matches ? "dark" : "light"));
+    if (c) document.documentElement.style.setProperty("--page", c);
+    else document.documentElement.style.removeProperty("--page");
+  }
+  for (const m of ["light", "dark"]) {
+    pick[m].value = localStorage.getItem(key(m)) || DEF[m];
+    pick[m].addEventListener("input", () => { localStorage.setItem(key(m), pick[m].value); apply(); });
+  }
+  document.getElementById("bgreset").addEventListener("click", () => {
+    for (const m of ["light", "dark"]) { localStorage.removeItem(key(m)); pick[m].value = DEF[m]; }
+    apply();
+  });
+  mq.addEventListener("change", apply);
+  apply();
+})();
 const NAMES = {weekly_all:"Weekly - all models", monthly_auto:"Monthly - Cursor models",
                monthly_api:"Monthly - other models", monthly:"Monthly - included usage"};
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}

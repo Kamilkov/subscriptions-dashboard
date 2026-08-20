@@ -1182,6 +1182,15 @@ class TestHtmlPage(unittest.TestCase):
         self.assertNotIn("opacity: .", page)
         self.assertNotIn("opacity:0.", page)
 
+    def test_background_picker_on_both_pages(self):
+        # Per-scheme user background, shared localStorage keys, edit both together.
+        import dashboard
+        for page in (dashboard.HTML_PAGE, dashboard.HISTORY_PAGE):
+            for needle in ('id="bgl"', 'id="bgd"', 'id="bgreset"',
+                           '"bgDark" : "bgLight"',
+                           'setProperty("--page"', 'removeProperty("--page")'):
+                self.assertIn(needle, page, needle)
+
 
 class TestMainOnce(unittest.TestCase):
     def test_once_prints_payload_and_seeds_history(self):

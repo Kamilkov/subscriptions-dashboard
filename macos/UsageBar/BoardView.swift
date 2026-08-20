@@ -17,6 +17,22 @@ private struct LaneItem: Identifiable {
 
 private func clamp01(_ x: Double) -> Double { max(0, min(1, x)) }
 
+// Hex "RRGGBB" <-> Color, for the user board-background setting (stored as
+// hex to stay parity-comparable with the web board's localStorage values).
+func colorFromHex(_ hex: String) -> Color? {
+    var v: UInt64 = 0
+    guard hex.count == 6, Scanner(string: hex).scanHexInt64(&v) else { return nil }
+    return Color(red: Double((v >> 16) & 0xFF) / 255,
+                 green: Double((v >> 8) & 0xFF) / 255,
+                 blue: Double(v & 0xFF) / 255)
+}
+
+func hexFromColor(_ c: Color) -> String {
+    let n = NSColor(c).usingColorSpace(.sRGB) ?? .black
+    return String(format: "%02X%02X%02X", Int(round(n.redComponent * 255)),
+                  Int(round(n.greenComponent * 255)), Int(round(n.blueComponent * 255)))
+}
+
 // Local midnights in (start, end) — Calendar day-walk stays DST-safe.
 private func midnights(start: Double, end: Double) -> [Double] {
     let cal = Calendar.current
@@ -45,11 +61,20 @@ private extension Pace {
 // extra width. `scale` stays available for an explicit display/kiosk mode.
 struct BoardWindow: View {
     let store: Store
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ScrollView {
             BoardView(store: store, isWindow: true)
                 .frame(maxWidth: .infinity)
+        }
+        // User background tint sits OVER the material (first .background is
+        // nearest the content), so the frosted-glass look survives underneath.
+        .background {
+            if let hex = scheme == .dark ? store.boardBgDark : store.boardBgLight,
+               let tint = colorFromHex(hex) {
+                tint.opacity(0.55).ignoresSafeArea()
+            }
         }
         // Same translucent material the MenuBarExtra dropdown gets for free —
         // adapts to wallpaper/appearance and honors "Reduce transparency".

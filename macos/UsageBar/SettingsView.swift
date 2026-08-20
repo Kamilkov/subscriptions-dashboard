@@ -29,7 +29,7 @@ struct SettingsView: View {
         // Forms are List-backed and never report an intrinsic height, so each
         // tab pins its own: tall enough for the full content, scroll disabled.
         TabView {
-            generalTab.frame(height: 250)
+            generalTab.frame(height: 400)
                 .tabItem { Label("General", systemImage: "gearshape") }
             providersTab.frame(height: 420)
                 .tabItem { Label("Providers", systemImage: "point.3.connected.trianglepath.dotted") }
@@ -74,8 +74,27 @@ struct SettingsView: View {
                 Text("Provider name shows which lane the number comes from.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("Board background") {
+                // Defaults mirror the web board's --page values.
+                ColorPicker("Light mode", selection: bgBinding(dark: false, fallback: "F1F1F4"),
+                            supportsOpacity: false)
+                ColorPicker("Dark mode", selection: bgBinding(dark: true, fallback: "151517"),
+                            supportsOpacity: false)
+                Button("Reset to default") {
+                    store.setBoardBg(dark: false, hex: nil)
+                    store.setBoardBg(dark: true, hex: nil)
+                }
+                Text("Tints the board window's translucent background; each appearance keeps its own colour.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private func bgBinding(dark: Bool, fallback: String) -> Binding<Color> {
+        Binding(
+            get: { colorFromHex((dark ? store.boardBgDark : store.boardBgLight) ?? fallback) ?? .clear },
+            set: { store.setBoardBg(dark: dark, hex: hexFromColor($0)) })
     }
 
     private var providersTab: some View {
