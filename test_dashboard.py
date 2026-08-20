@@ -519,43 +519,6 @@ class TestCredentialsAndFetch(unittest.TestCase):
         self.assertEqual(seen["headers"]["Authorization"], "Bearer tok-abc")
         self.assertEqual(seen["headers"]["anthropic-beta"], "oauth-2025-04-20")
 
-    def test_parse_gemini(self):
-        import dashboard
-        out = dashboard.parse_gemini(load_fixture("gemini_quota.json"))
-        self.assertEqual(out["gemini-2.5-pro"]["pct"], 65.0)
-        self.assertEqual(out["gemini-2.5-flash"]["pct"], 0.0)
-        # remainingFraction omitted = untouched quota, NOT 0% remaining
-        self.assertEqual(out["gemini-2.5-flash-lite"]["pct"], 0.0)
-        self.assertFalse(out["gemini-2.5-flash-lite"]["blocked"])
-        self.assertEqual(out["gemini-3.1-flash-lite"]["pct"], 100.0)
-        self.assertTrue(out["gemini-3.1-flash-lite"]["blocked"])
-        self.assertEqual(out["gemini-2.5-pro"]["window_seconds"], 86400.0)
-        self.assertEqual(out["gemini-2.5-pro"]["resets_at"], "2026-08-18T08:59:22Z")
-
-    def test_parse_gemini_empty_buckets_raises(self):
-        import dashboard
-        for payload in ({"buckets": []}, {"buckets": [{"tokenType": "REQUESTS"}]}, {}):
-            with self.assertRaises(dashboard.FetchError) as cm:
-                dashboard.parse_gemini(payload)
-            self.assertEqual(cm.exception.category, "parse")
-
-    def test_fetch_gemini_wires_refresh_and_parser(self):
-        import dashboard
-        seen = {}
-
-        def fake_post(url, headers, body, opener=None):
-            seen["url"], seen["headers"], seen["body"] = url, headers, body
-            return load_fixture("gemini_quota.json")
-
-        out = dashboard.fetch_gemini(read_creds=lambda: ("rt-1", "proj-9"),
-                                     refresh=lambda rt: f"at-for-{rt}",
-                                     post=fake_post)
-        self.assertEqual(out["gemini-2.5-pro"]["pct"], 65.0)
-        self.assertEqual(seen["url"],
-                         "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota")
-        self.assertEqual(seen["headers"]["Authorization"], "Bearer at-for-rt-1")
-        self.assertEqual(seen["body"], {"project": "proj-9"})
-
     def test_parse_copilot(self):
         import dashboard
         out = dashboard.parse_copilot(load_fixture("copilot_user.json"))
@@ -668,10 +631,37 @@ class TestCredentialsAndFetch(unittest.TestCase):
         c["planUsage"]["autoPercentUsed"] = "Infinity"
         with self.assertRaises(dashboard.FetchError):
             dashboard.parse_cursor(c)
-        g = load_fixture("gemini_quota.json")
-        g["buckets"][0]["remainingFraction"] = "NaN"
+        a = load_fixture("antigravity_quota.json")
+        a["response"]["groups"][0]["buckets"][0]["remainingFraction"] = "NaN"
         with self.assertRaises(dashboard.FetchError):
-            dashboard.parse_gemini(g)
+            dashboard.parse_antigravity(a)
+
+    def test_num_rejects_absurd_but_accepts_ms_epochs(self):
+        # A finite 1e300 percent traps the Swift port's Int() render sites and
+        # renders as garbage here — same boundary rejects it. Millisecond
+        # billing epochs (~1.8e12) must still pass.
+        import dashboard
+        with self.assertRaises(ValueError):
+            dashboard._num(1e300)
+        with self.assertRaises(ValueError):
+            dashboard._num(-1e15)
+        self.assertEqual(dashboard._num(1.8e12), 1.8e12)
+
+    def test_derived_percent_overflow_rejected_python(self):
+        # -9e14 passes the raw bound but derives an absurd percent — the
+        # derived value is re-validated at construction.
+        import dashboard
+        payload = {"response": {"groups": [{"displayName": "Gemini Models", "buckets": [
+            {"window": "weekly", "resetTime": "2026-08-24T09:00:00Z",
+             "remainingFraction": -9e14}]}]}}
+        with self.assertRaises(dashboard.FetchError):
+            dashboard.parse_antigravity(payload)
+        cp = load_fixture("copilot_user.json")
+        lane = next(iter(cp["quota_snapshots"]))
+        # Raw value passes the 1e15 bound; derived 100 - remaining crosses it.
+        cp["quota_snapshots"][lane]["percent_remaining"] = -(1e15 - 50)
+        out = dashboard.parse_copilot(cp)  # that lane skipped, or none at all
+        self.assertNotIn(lane, out)
 
     def _cursor_db(self, dirpath, token="not set"):
         import base64, sqlite3
@@ -786,6 +776,26 @@ class TestRefresh(unittest.TestCase):
         import dashboard
         dashboard.reset_state()
         self.tmp.cleanup()
+
+    def test_refresh_prunes_history_older_than_60_days(self):
+        # Retention must hold continuously (memory AND disk), not only across
+        # restarts via load_history.
+        import dashboard
+        now = 1_800_000_000.0
+        old_ts = now - 61 * 86400
+        old = {"ts": dashboard.epoch_to_iso(old_ts), "ts_epoch": old_ts}
+        self.hpath.write_text(json.dumps({"ts": old["ts"]}) + "\n")
+        dashboard.HISTORY.append(old)
+        dashboard.refresh(force=True, now_fn=lambda: now,
+                          fetchers={"claude": lambda: dashboard.parse_claude(
+                              load_fixture("claude_usage.json"))},
+                          history_path=self.hpath)
+        self.assertEqual(len(dashboard.HISTORY), 1)  # only the new snapshot
+        self.assertTrue(all(s["ts_epoch"] >= now - 60 * 86400
+                            for s in dashboard.HISTORY))
+        lines = self.hpath.read_text().splitlines()
+        self.assertEqual(len(lines), 1)              # old line gone from disk
+        self.assertNotIn(old["ts"], lines[0])
 
     def fetchers(self, claude_result="ok", codex_result="ok", counter=None):
         import dashboard
@@ -1071,6 +1081,7 @@ class TestServerIntegration(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             _urlreq.urlopen(req, timeout=10)
         self.assertEqual(cm.exception.code, 404)
+        cm.exception.close()  # deterministic: don't leave the 404 body to GC
 
     def test_degraded_codex_auth_other_service_survives(self):
         import dashboard
@@ -1188,8 +1199,47 @@ class TestHtmlPage(unittest.TestCase):
         for page in (dashboard.HTML_PAGE, dashboard.HISTORY_PAGE):
             for needle in ('id="bgl"', 'id="bgd"', 'id="bgreset"',
                            '"bgDark" : "bgLight"',
-                           'setProperty("--page"', 'removeProperty("--page")'):
+                           'setProperty("--page"', 'removeProperty("--page")',
+                           # PRODUCT.md contrast rule: stored values only apply
+                           # when bgOK passes; failing picks snap back.
+                           'function bgOK(', '>= 4.5',
+                           'if (c && bgOK(c, m === "dark"))',
+                           'if (!bgOK(pick[m].value, m === "dark"))'):
                 self.assertIn(needle, page, needle)
+
+
+class TestDocs(unittest.TestCase):
+    def test_docs_name_all_five_providers(self):
+        # Docs must describe the five-provider reality — no retired Gemini,
+        # no stale "four providers" counts.
+        root = Path(__file__).resolve().parent
+        for rel in ("README.md", "PRODUCT.md", "macos/README.md"):
+            text = (root / rel).read_text()
+            for name in ("Claude", "Codex", "Cursor", "Antigravity", "Copilot"):
+                self.assertIn(name, text, rel)
+            self.assertNotIn("Gemini", text, rel)
+            self.assertNotIn("four providers", text, rel)
+
+
+class TestGeminiRetired(unittest.TestCase):
+    def test_gemini_provider_fully_retired(self):
+        # gemini-cli was removed 2026-08-20; only Antigravity's Gemini POOL
+        # label may remain. Revive the provider from git history if ever needed.
+        import dashboard
+        self.assertFalse(hasattr(dashboard, "parse_gemini"))
+        self.assertFalse(hasattr(dashboard, "fetch_gemini"))
+        self.assertNotIn("gemini", dashboard.HTML_PAGE)
+        self.assertNotIn("gemini", dashboard.SERVICES)
+
+
+class TestLaneOrder(unittest.TestCase):
+    def test_lanes_sorted_globally_worst_first(self):
+        # Merged-board spec line 104: worst pace first (over → on → under),
+        # tiebreak soonest reset — GLOBAL order, no provider clustering.
+        import dashboard
+        self.assertIn("(RANK[a.d.pace] - RANK[b.d.pace]) || (a.d.reset_epoch - b.d.reset_epoch)",
+                      dashboard.HTML_PAGE)
+        self.assertNotIn("worst[a.svc]", dashboard.HTML_PAGE)
 
 
 class TestMainOnce(unittest.TestCase):
@@ -1228,6 +1278,147 @@ class TestMainOnce(unittest.TestCase):
              mock.patch.object(dashboard, "POLL_SECONDS", 0.01):
             dashboard.poll_loop(stop)
         self.assertGreaterEqual(calls["n"], 3)  # kept looping despite exceptions
+
+
+class TestInstallScripts(unittest.TestCase):
+    """Run the real installer scripts hermetically: HOME in a temp dir,
+    launchctl replaced via the LAUNCHCTL env override (true/false), plutil
+    optionally shimmed via PATH. Nothing touches the live LaunchAgents."""
+    ROOT = Path(__file__).resolve().parent
+
+    def _run(self, script, home, launchctl, path_prefix=None):
+        import os
+        import subprocess
+        env = {**os.environ, "HOME": str(home), "LAUNCHCTL": launchctl}
+        if path_prefix:
+            env["PATH"] = f"{path_prefix}:{env['PATH']}"
+        return subprocess.run(["bash", str(self.ROOT / script)],
+                              capture_output=True, text=True, cwd=self.ROOT, env=env)
+
+    def test_bash_syntax(self):
+        import subprocess
+        for s in ("install.sh", "install-canary.sh", "uninstall.sh"):
+            cp = subprocess.run(["bash", "-n", str(self.ROOT / s)],
+                                capture_output=True, text=True)
+            self.assertEqual(cp.returncode, 0, f"{s}: {cp.stderr}")
+
+    def test_clean_install_renders_valid_plist_no_debris(self):
+        import subprocess
+        for script, label in (("install.sh", "com.kamil.usage-dashboard"),
+                              ("install-canary.sh", "com.kamil.usagebar-canary")):
+            with tempfile.TemporaryDirectory() as d:
+                cp = self._run(script, d, "true")  # launchctl stubbed out
+                self.assertEqual(cp.returncode, 0, f"{script}: {cp.stderr}")
+                agents = Path(d) / "Library/LaunchAgents"
+                plist = agents / f"{label}.plist"
+                self.assertTrue(plist.exists(), script)
+                self.assertEqual(subprocess.run(["plutil", "-lint", str(plist)],
+                                                capture_output=True).returncode, 0)
+                leftovers = [p.name for p in agents.iterdir() if p.name != plist.name]
+                self.assertEqual(leftovers, [], script)
+
+    def test_validation_failure_leaves_prior_plist_and_no_debris(self):
+        import os
+        with tempfile.TemporaryDirectory() as d:
+            agents = Path(d) / "Library/LaunchAgents"
+            agents.mkdir(parents=True)
+            plist = agents / "com.kamil.usage-dashboard.plist"
+            plist.write_text("PRIOR-WORKING-PLIST")
+            shim = Path(d) / "bin"
+            shim.mkdir()
+            fake = shim / "plutil"
+            fake.write_text("#!/bin/sh\nexit 1\n")
+            os.chmod(fake, 0o755)
+            cp = self._run("install.sh", d, "true", path_prefix=shim)
+            self.assertNotEqual(cp.returncode, 0)
+            self.assertEqual(plist.read_text(), "PRIOR-WORKING-PLIST")
+            leftovers = [p.name for p in agents.iterdir() if p.name != plist.name]
+            self.assertEqual(leftovers, [])
+
+    def test_replacement_mv_failure_leaves_prior_plist_and_no_debris(self):
+        # Force the validated NEW -> PLIST mv to fail AFTER the backup was
+        # created: the sentinel live plist must survive untouched and no
+        # .new*/.bak debris may remain (any-failure/no-debris guarantee).
+        import os
+        for script, label in (("install.sh", "com.kamil.usage-dashboard"),
+                              ("install-canary.sh", "com.kamil.usagebar-canary")):
+            with tempfile.TemporaryDirectory() as d:
+                agents = Path(d) / "Library/LaunchAgents"
+                agents.mkdir(parents=True)
+                plist = agents / f"{label}.plist"
+                plist.write_text("PRIOR-WORKING-PLIST")
+                shim = Path(d) / "bin"
+                shim.mkdir()
+                fake = shim / "mv"
+                fake.write_text("#!/bin/sh\nexit 1\n")
+                os.chmod(fake, 0o755)
+                cp = self._run(script, d, "true", path_prefix=shim)
+                self.assertNotEqual(cp.returncode, 0, script)
+                self.assertEqual(plist.read_text(), "PRIOR-WORKING-PLIST", script)
+                leftovers = [p.name for p in agents.iterdir() if p.name != plist.name]
+                self.assertEqual(leftovers, [], script)
+
+    def test_bootstrap_failure_restores_prior_plist(self):
+        with tempfile.TemporaryDirectory() as d:
+            agents = Path(d) / "Library/LaunchAgents"
+            agents.mkdir(parents=True)
+            plist = agents / "com.kamil.usage-dashboard.plist"
+            plist.write_text("PRIOR-WORKING-PLIST")
+            cp = self._run("install.sh", d, "false")  # every launchctl fails
+            self.assertNotEqual(cp.returncode, 0)
+            self.assertEqual(plist.read_text(), "PRIOR-WORKING-PLIST",
+                             "prior plist must be restored byte-identical")
+            self.assertIn("restored", cp.stderr)
+            leftovers = [p.name for p in agents.iterdir() if p.name != plist.name]
+            self.assertEqual(leftovers, [])
+
+
+class TestRedirects(unittest.TestCase):
+    def test_cross_origin_redirect_refused(self):
+        # A 302 from origin A to origin B must NOT be followed: urllib would
+        # re-send the Authorization header to B. The fetch fails as "network"
+        # and B never sees a single request.
+        import dashboard
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        hits = []
+
+        class B(BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(dict(self.headers))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        srv_b = ThreadingHTTPServer(("127.0.0.1", 0), B)
+        port_b = srv_b.server_address[1]
+
+        class A(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(302)
+                self.send_header("Location", f"http://127.0.0.1:{port_b}/steal")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        srv_a = ThreadingHTTPServer(("127.0.0.1", 0), A)
+        port_a = srv_a.server_address[1]
+        for srv in (srv_a, srv_b):
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            self.addCleanup(srv.server_close)
+            self.addCleanup(srv.shutdown)
+
+        with self.assertRaises(dashboard.FetchError) as cm:
+            dashboard.http_get_json(f"http://127.0.0.1:{port_a}/usage",
+                                    {"Authorization": "Bearer secret-token"})
+        self.assertEqual(cm.exception.category, "network")
+        self.assertIn("302", cm.exception.detail)
+        self.assertEqual(hits, [])  # the credential never left origin A
 
 
 if __name__ == "__main__":

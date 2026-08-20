@@ -42,7 +42,8 @@ separately. This matches the official rate-limit model (one shared quota, consum
 proportionally to token cost).
 
 **Why not the endpoint the dashboard already uses:** `cloudcode-pa …
-:retrieveUserQuota` (the current `fetch_gemini` path in `dashboard.py:237`) is the
+:retrieveUserQuota` (the former `fetch_gemini` path in `dashboard.py`, retired and
+removed 2026-08-20) is the
 gemini-cli / Gemini Code Assist quota — REQUEST-count buckets for the CLI, a different
 product. It 403s for Antigravity's quota because gemini-cli's public OAuth client isn't
 authorized for it (verified: 403 PERMISSION_DENIED using the existing
@@ -148,7 +149,7 @@ the old `:retrieveUserQuota`:
 
 - **`v1internal:retrieveUserQuotaSummary`** — the new one Antigravity uses (grouped
   weekly/5h buckets, `remainingFraction`). This is the material difference vs. the
-  dashboard's current `:retrieveUserQuota` (per-model REQUEST-count buckets for gemini-cli).
+  dashboard's former `:retrieveUserQuota` (per-model REQUEST-count buckets for gemini-cli).
 - `google.cloud.businessaicode.v1beta|v1main.PredictionService/FetchQuotaStatus` and
   `businessaicode.googleapis.com/locations.fetchQuotaStatus` — a separate "business AI
   code" quota surface (enterprise/BwG), not needed here.

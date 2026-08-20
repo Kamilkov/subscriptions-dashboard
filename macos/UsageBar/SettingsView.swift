@@ -6,13 +6,12 @@ private let providerNames: [String: String] = [
     "claude": "Anthropic — Claude Code",
     "codex": "OpenAI — Codex",
     "cursor": "Cursor",
-    "gemini": "Google — Gemini",
     "antigravity": "Google — Antigravity",
     "copilot": "GitHub — Copilot",
 ]
 
 // "claude.weekly_all" -> "Anthropic — Claude Code · Weekly - all models".
-// Split on the FIRST dot only; lane labels may contain dots (gemini-2.5-pro).
+// Split on the FIRST dot only; lane labels may contain dots.
 // Pass the limit when known so the vendor-provided lane name wins.
 private func pinnedLabel(_ id: String, _ limit: Limit? = nil) -> String {
     let parts = id.split(separator: ".", maxSplits: 1)
@@ -84,7 +83,7 @@ struct SettingsView: View {
                     store.setBoardBg(dark: false, hex: nil)
                     store.setBoardBg(dark: true, hex: nil)
                 }
-                Text("Tints the board window's translucent background; each appearance keeps its own colour.")
+                Text("Tints the board window's translucent background; each appearance keeps its own colour. Colours that sink text contrast below 4.5:1 are not applied.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

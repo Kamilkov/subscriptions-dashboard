@@ -24,6 +24,8 @@ final class Store {
     var history: [HistorySnapshot] = []
     var lastPoll: Double = 0
     private var polling = false
+    private var inFlight: Set<String> = []    // services the current poll covers
+    private var pendingOnly: Set<String> = []  // requested mid-poll, not covered
     private var pollTask: Task<Void, Never>?
 
     // Regular-app mode (Dock, Cmd-Tab, window chrome) is on while ANY content
@@ -98,11 +100,22 @@ final class Store {
 
     // Board background tint over the window material, one colour per
     // appearance; hex "RRGGBB", nil = plain material (default). Mirrors the
-    // web board's bgLight/bgDark localStorage setting.
-    var boardBgLight: String? = UserDefaults.standard.string(forKey: "boardBgLight")
-    var boardBgDark: String? = UserDefaults.standard.string(forKey: "boardBgDark")
+    // web board's bgLight/bgDark localStorage setting. Values persisted before
+    // the contrast rule existed are purged at init, not just rejected on set.
+    var boardBgLight: String? = Store.sanitizedBg(key: "boardBgLight", dark: false)
+    var boardBgDark: String? = Store.sanitizedBg(key: "boardBgDark", dark: true)
+
+    private static func sanitizedBg(key: String, dark: Bool) -> String? {
+        guard let hex = UserDefaults.standard.string(forKey: key) else { return nil }
+        guard bgContrastOK(hex, dark: dark) else {
+            UserDefaults.standard.removeObject(forKey: key)
+            return nil
+        }
+        return hex
+    }
 
     func setBoardBg(dark: Bool, hex: String?) {
+        if let hex, !bgContrastOK(hex, dark: dark) { return }  // picker snaps back
         let key = dark ? "boardBgDark" : "boardBgLight"
         if dark { boardBgDark = hex } else { boardBgLight = hex }
         if let hex { UserDefaults.standard.set(hex, forKey: key) }
@@ -118,13 +131,15 @@ final class Store {
         UserDefaults.standard.set(gridMode, forKey: "gridMode")
     }
 
-    init() {
+    init(startPolling: Bool = true) {
         history = HistoryFile.load()
         seedFromHistory()
-        pollTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refresh(force: true)
-                try? await Task.sleep(for: .seconds(pollSeconds))
+        if startPolling {
+            pollTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    await self?.refresh(force: true)
+                    try? await Task.sleep(for: .seconds(pollSeconds))
+                }
             }
         }
     }
@@ -142,20 +157,42 @@ final class Store {
         }
     }
 
-    func refresh(force: Bool = false, only: Set<String>? = nil) async {
+    func refresh(force: Bool = false, only: Set<String>? = nil,
+                 fetchers: [String: @Sendable () async throws -> [String: Limit]]? = nil) async {
+        if polling {
+            // Single-flight: the in-flight poll's results serve everyone. Queue
+            // only what it is NOT already fetching (a provider enabled mid-poll,
+            // or the rest of a full refresh during a partial poll); drained below.
+            let requested = only ?? enabled
+            pendingOnly.formUnion(requested.intersection(enabled).subtracting(inFlight))
+            return
+        }
         let now = Date().timeIntervalSince1970
-        if polling { return }  // single-flight; the in-flight poll's result serves everyone
         if only == nil, !force, lastPoll > 0, now - lastPoll < freshSeconds { return }
         polling = true
-        defer { polling = false }
+        await performPoll(wanted: only.map { $0.intersection(enabled) } ?? enabled,
+                          only: only, fetchers: fetchers)
+        polling = false
+        while !pendingOnly.isEmpty {  // requests that arrived while polling
+            let queued = pendingOnly
+            pendingOnly = []
+            polling = true
+            await performPoll(wanted: queued.intersection(enabled), only: queued,
+                              fetchers: fetchers)
+            polling = false
+        }
+    }
 
-        let fetchers: [String: @Sendable () async throws -> [String: Limit]] = [
+    private func performPoll(wanted: Set<String>, only: Set<String>?,
+                             fetchers fetchersIn: [String: @Sendable () async throws -> [String: Limit]]?) async {
+        inFlight = wanted
+        defer { inFlight = [] }
+        let fetchers = fetchersIn ?? [
             "claude": Providers.fetchClaude, "codex": Providers.fetchCodex,
             "cursor": Providers.fetchCursor,
             "antigravity": Providers.fetchAntigravity,
             "copilot": Providers.fetchCopilot,
         ]
-        let wanted = only.map { $0.intersection(enabled) } ?? enabled
         let results = await withTaskGroup(
             of: (String, Result<[String: Limit], FetchError>).self,
             returning: [String: Result<[String: Limit], FetchError>].self
@@ -184,7 +221,15 @@ final class Store {
             }
         }
         history.append(snap)
-        HistoryFile.append(snap)
+        // Retention holds continuously, not just at startup: drop expired
+        // snapshots each poll, compacting the file only when something fell off.
+        let cutoff = ts - Double(historyDays) * 86400
+        if history.first.map({ $0.tsEpoch < cutoff }) == true {
+            history.removeAll { $0.tsEpoch < cutoff }
+            HistoryFile.rewrite(history)
+        } else {
+            HistoryFile.append(snap)
+        }
         publishShared()
     }
 
@@ -284,8 +329,12 @@ private func postAlerts(_ alerts: [LaneAlert]) {
 
 // MARK: - history file
 
+@MainActor
 enum HistoryFile {
-    static let url: URL = {
+    // var, not let: tests point this at a temp file so retention checks never
+    // touch the user's real Application Support history. MainActor-isolated
+    // (only the MainActor Store touches it) so the mutable static is safe.
+    static var url: URL = {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("UsageBar", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -302,10 +351,14 @@ enum HistoryFile {
             return snap
         }
         // Rewrite compacted (drops expired + malformed lines).
-        let lines = kept.compactMap { try? JSONSerialization.data(withJSONObject: Snapshot.encode($0)) }
+        rewrite(kept)
+        return kept
+    }
+
+    static func rewrite(_ snaps: [HistorySnapshot]) {
+        let lines = snaps.compactMap { try? JSONSerialization.data(withJSONObject: Snapshot.encode($0)) }
             .compactMap { String(data: $0, encoding: .utf8) }
         try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
-        return kept
     }
 
     static func append(_ snap: HistorySnapshot) {

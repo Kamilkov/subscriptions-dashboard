@@ -1,7 +1,7 @@
 # UsageBar
 
 **Free macOS menu-bar app showing your AI subscription usage vs. time — Claude
-Code, Codex, Cursor, and Gemini on one board.**
+Code, Codex, Cursor, Antigravity, and GitHub Copilot on one board.**
 
 Every lane answers one question: am I burning my quota faster than the window
 is elapsing? Fill = usage, tick = time elapsed, pace badge (UNDER / ON PACE /
@@ -17,8 +17,9 @@ open the DMG, drag to Applications. Auto-updates via Sparkle. macOS 15+.
 One of the [machros.app](https://machros.app/) family of small, careful apps.
 
 - Reads the tokens your existing CLIs/apps already store (Keychain,
-  `~/.codex/auth.json`, Cursor's local DB, `~/.gemini`) at fetch time — tokens
-  are never stored, logged, or sent anywhere except to each vendor's own API.
+  `~/.codex/auth.json`, Cursor's local DB, Antigravity's local language
+  server, `~/.config/github-copilot/apps.json`) at fetch time — tokens are
+  never stored, logged, or sent anywhere except to each vendor's own API.
 - These are unofficial vendor endpoints; when one changes shape, the affected
   lane degrades to "stale" (never a wrong number) and a fix ships via
   auto-update. See `macos/README.md` for architecture and build instructions.
@@ -50,7 +51,8 @@ Then open <http://127.0.0.1:8787>.
 
 ## Pages
 
-- <http://127.0.0.1:8787> — AI subscription quota vs. time (Claude, Codex, Cursor)
+- <http://127.0.0.1:8787> — AI subscription quota vs. time (Claude, Codex,
+  Cursor, Antigravity, Copilot)
 - <http://127.0.0.1:8787/history> — weekly utilization (peak usage per reset window)
 
 ## Tests
@@ -74,12 +76,15 @@ Then open <http://127.0.0.1:8787>.
 ## Security notes
 
 - Credentials are read at poll time from the macOS Keychain
-  (`Claude Code-credentials`) and `~/.codex/auth.json`; they are never
-  written to disk, logs, or API responses, and never sent anywhere except
-  `api.anthropic.com` / `chatgpt.com`.
+  (`Claude Code-credentials`), `~/.codex/auth.json`, Cursor's local DB,
+  Antigravity's process-local CSRF token, and
+  `~/.config/github-copilot/apps.json`; they are never written to disk, logs,
+  or API responses, and never sent anywhere except `api.anthropic.com`,
+  `chatgpt.com`, `cursor.com`, `api.github.com`, and the local Antigravity
+  language server on `127.0.0.1`.
 - The server rejects non-loopback connections by construction (it binds
   `127.0.0.1` only).
-- Both usage endpoints are the vendors' internal CLI endpoints and may change
+- All five usage endpoints are the vendors' internal CLI endpoints and may change
   without notice; the dashboard degrades to stale banners rather than crashing.
   (Observed in practice: the Codex weekly window switched slots within a single
   day — the parser identifies windows by length, not position.)

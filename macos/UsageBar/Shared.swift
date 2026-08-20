@@ -3,8 +3,8 @@
 // the widget (always sandboxed, no credential access) only reads it.
 import Foundation
 
-// "gemini" (gemini-cli quota) retired 2026-08 — never reflects Antigravity
-// usage; parser/fetcher kept, re-add here + Store fetchers to revive.
+// "gemini" (gemini-cli quota) retired 2026-08, implementation removed
+// 2026-08-20 — revive from git history if gemini-cli ever comes back.
 let services = ["claude", "codex", "cursor", "antigravity", "copilot"]
 let appGroupID = "JXGJ4K9KR9.group.com.kamilkovac.usagebar"
 
@@ -66,14 +66,18 @@ enum Snapshot {
 
     // containerURL needs the app-group entitlement; the unsandboxed app can
     // fall back to the literal Group Containers path.
-    static var sharedURL: URL {
+    // Stored (not computed) so tests can point it into a temp dir — every
+    // Store.refresh ends in writeShared, which must never touch the user's
+    // real App Group latest.json from a test. nonisolated(unsafe): the widget
+    // target only reads it, and only tests ever reassign (on the main actor).
+    nonisolated(unsafe) static var sharedURL: URL = {
         let container = FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
             ?? FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Group Containers/\(appGroupID)")
         try? FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
         return container.appendingPathComponent("latest.json")
-    }
+    }()
 
     static func writeShared(_ snap: HistorySnapshot) {
         guard let data = try? JSONSerialization.data(withJSONObject: encode(snap)) else { return }

@@ -20,8 +20,7 @@ private func clamp01(_ x: Double) -> Double { max(0, min(1, x)) }
 // Hex "RRGGBB" <-> Color, for the user board-background setting (stored as
 // hex to stay parity-comparable with the web board's localStorage values).
 func colorFromHex(_ hex: String) -> Color? {
-    var v: UInt64 = 0
-    guard hex.count == 6, Scanner(string: hex).scanHexInt64(&v) else { return nil }
+    guard let v = hexRGBValue(hex) else { return nil }  // strict: whole string
     return Color(red: Double((v >> 16) & 0xFF) / 255,
                  green: Double((v >> 8) & 0xFF) / 255,
                  blue: Double(v & 0xFF) / 255)
@@ -350,19 +349,10 @@ struct BoardView: View {
                     verdict: exhaust.map { "runs out ~" + fmtReset($0) } ?? "lasts past reset"))
             }
         }
-        // Cluster lanes by provider (web parity): providers ordered by their
-        // worst lane (rank, then usage), lanes worst-first inside the cluster.
-        var worst: [String: Double] = [:]
-        for it in out {
-            let k = Double(it.pace.rank) + (100 - it.limit.pct) / 1000
-            worst[it.svc] = min(worst[it.svc] ?? .infinity, k)
-        }
+        // Merged-board spec (web parity): worst pace first, tiebreak soonest
+        // reset — global order within the group, no provider clustering.
         return out.sorted {
-            let (wa, wb) = (worst[$0.svc]!, worst[$1.svc]!)
-            if wa != wb { return wa < wb }
-            if $0.svc != $1.svc { return $0.svc < $1.svc }
-            return $0.pace.rank != $1.pace.rank ? $0.pace.rank < $1.pace.rank
-                : $0.limit.resetEpoch < $1.limit.resetEpoch
+            worseLane(($0.pace, $0.limit.resetEpoch), ($1.pace, $1.limit.resetEpoch))
         }
     }
 
@@ -423,7 +413,6 @@ struct BoardView: View {
         ["claude": "Token stale — open Claude Code once",
          "codex": "Token stale — run codex once",
          "cursor": "Token stale — open Cursor once",
-         "gemini": "Token stale — run gemini once",
          "antigravity": "Antigravity not running — open it to see usage",
          "copilot": "Token stale — sign into Copilot once"][svc] ?? svc
     }

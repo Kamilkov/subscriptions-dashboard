@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import dashboard
 from dashboard import FetchError
 
-# All fetchers live in dashboard.py now (Gemini included since 2026-08-17), so
-# the canary exercises exactly the code the web app runs.
+# All fetchers live in dashboard.py (all five providers), so the canary
+# exercises exactly the code the web app runs.
 CHECKS = {s: getattr(dashboard, f"fetch_{s}") for s in dashboard.SERVICES}
 
 

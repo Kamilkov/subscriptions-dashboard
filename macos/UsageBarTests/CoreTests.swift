@@ -38,26 +38,26 @@ final class CoreTests: XCTestCase {
         let quiet = Limit(pct: 10, resetEpoch: now + 1000, windowSeconds: 18000, blocked: false)
         let busy = Limit(pct: 80, resetEpoch: now + 1000, windowSeconds: 18000, blocked: false)
         let blocked = Limit(pct: 60, resetEpoch: now + 1000, windowSeconds: 18000, blocked: true)
-        let lanes = [("claude.session", quiet), ("codex.weekly", busy), ("gemini.g-2.5-pro", blocked)]
+        let lanes = [("claude.session", quiet), ("codex.weekly", busy), ("antigravity.g-2.5-pro", blocked)]
         // nil -> automatic: blocked outranks higher usage
         XCTAssertEqual(pickTitleLimit(pinned: nil, lanes: lanes, now: now), blocked)
         // pinned and visible -> that lane, even if quiet (dotted label survives)
         XCTAssertEqual(pickTitleLimit(pinned: "claude.session", lanes: lanes, now: now), quiet)
-        XCTAssertEqual(pickTitleLimit(pinned: "gemini.g-2.5-pro", lanes: lanes, now: now), blocked)
+        XCTAssertEqual(pickTitleLimit(pinned: "antigravity.g-2.5-pro", lanes: lanes, now: now), blocked)
         // pinned but vanished -> automatic fallback, never frozen/blank
         XCTAssertEqual(pickTitleLimit(pinned: "cursor.monthly_api", lanes: lanes, now: now), blocked)
         XCTAssertNil(pickTitleLimit(pinned: nil, lanes: [], now: now))
         // pickTitleLane carries the id so the menu bar can name the provider,
-        // splitting on the FIRST dot only (gemini lane labels contain dots).
-        let lane = pickTitleLane(pinned: "gemini.g-2.5-pro", lanes: lanes, now: now)
-        XCTAssertEqual(lane?.id, "gemini.g-2.5-pro")
-        XCTAssertEqual(lane.map { String($0.id.split(separator: ".", maxSplits: 1)[0]) }, "gemini")
+        // splitting on the FIRST dot only (lane labels may contain dots).
+        let lane = pickTitleLane(pinned: "antigravity.g-2.5-pro", lanes: lanes, now: now)
+        XCTAssertEqual(lane?.id, "antigravity.g-2.5-pro")
+        XCTAssertEqual(lane.map { String($0.id.split(separator: ".", maxSplits: 1)[0]) }, "antigravity")
     }
 
     func testErrorSummaryNamesEveryProvider() throws {
         XCTAssertNil(errorSummary([:]))
         let s = try XCTUnwrap(errorSummary(
-            ["codex": "auth", "claude": "network", "gemini": "parse", "cursor": "auth",
+            ["codex": "auth", "claude": "network", "cursor": "auth",
              "antigravity": "auth", "copilot": "auth"]))
         for svc in services { XCTAssertTrue(s.contains(svc), "missing \(svc) in \(s)") }
         XCTAssertTrue(s.hasPrefix("⚠ antigravity auth"))  // sorted → deterministic
@@ -134,23 +134,6 @@ final class CoreTests: XCTestCase {
     func testParseCursorBadCycle() {
         let payload = #"{"billingCycleStart": "2000", "billingCycleEnd": "1000", "planUsage": {"autoPercentUsed": 1, "apiPercentUsed": 2}}"#
         XCTAssertThrowsError(try parseCursor(Data(payload.utf8)))
-    }
-
-    func testParseGemini() throws {
-        let out = try parseGemini(fixture("gemini_quota"))
-        XCTAssertEqual(out.count, 4)
-        XCTAssertEqual(out["gemini-2.5-pro"]?.pct, 65.0)             // 1 - 0.35 remaining
-        XCTAssertEqual(out["gemini-2.5-flash"]?.pct, 0)
-        XCTAssertEqual(out["gemini-2.5-flash-lite"]?.pct, 0)         // fraction omitted = untouched
-        XCTAssertEqual(out["gemini-3.1-flash-lite"]?.pct, 100)
-        XCTAssertEqual(out["gemini-3.1-flash-lite"]?.blocked, true)  // remainingFraction 0
-        XCTAssertEqual(out["gemini-2.5-pro"]?.blocked, false)
-        XCTAssertEqual(out["gemini-2.5-pro"]?.windowSeconds, daySeconds)
-        XCTAssertEqual(out["gemini-2.5-pro"]!.resetEpoch, 1787043562, accuracy: 1)
-    }
-
-    func testParseGeminiEmptyBuckets() {
-        XCTAssertThrowsError(try parseGemini(Data(#"{"buckets": []}"#.utf8)))
     }
 
     func testParseCopilot() throws {
@@ -287,5 +270,69 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(Bucket(windowSeconds: 18000), .rolling)
         XCTAssertEqual(Bucket(windowSeconds: 604800), .weekly)
         XCTAssertEqual(Bucket(windowSeconds: 2_592_000), .monthly)
+    }
+
+    // MARK: - board background contrast (PRODUCT.md: ≥ 4.5:1 in both themes)
+
+    func testBoardBackgroundContrastRule() {
+        XCTAssertTrue(bgContrastOK("F1F1F4", dark: false))   // default light
+        XCTAssertTrue(bgContrastOK("151517", dark: true))    // default dark
+        XCTAssertFalse(bgContrastOK("000000", dark: false))  // black page, near-black ink
+        XCTAssertFalse(bgContrastOK("FFFFFF", dark: true))   // white page, near-white ink
+        XCTAssertFalse(bgContrastOK("808080", dark: false))  // mid-grey fails both
+        XCTAssertFalse(bgContrastOK("808080", dark: true))
+        XCTAssertFalse(bgContrastOK("nope", dark: false))    // malformed = rejected
+        // Scanner accepts a valid prefix ("FF000Z" scans as 0xFF000) — the
+        // whole string must parse, in both validators.
+        XCTAssertFalse(bgContrastOK("FF000Z", dark: false))
+        XCTAssertNil(colorFromHex("FF000Z"))
+    }
+
+    // MARK: - lane ordering (merged-board spec: global worst first)
+
+    func testWorseLaneOrdersByPaceThenSoonestReset() {
+        XCTAssertTrue(worseLane((.over, 400), (.on, 100)))    // pace dominates
+        XCTAssertTrue(worseLane((.on, 400), (.under, 100)))
+        XCTAssertFalse(worseLane((.under, 100), (.over, 400)))
+        XCTAssertTrue(worseLane((.over, 100), (.over, 400)))  // equal pace: sooner reset first
+        XCTAssertFalse(worseLane((.over, 400), (.over, 100)))
+    }
+
+    // MARK: - finite-but-absurd values (would trap in Int() at render sites)
+
+    func testAbsurdRawPercentRejected() throws {
+        var payload = try XCTUnwrap(JSONSerialization.jsonObject(
+            with: fixture("claude_usage")) as? [String: Any])
+        var limits = try XCTUnwrap(payload["limits"] as? [[String: Any]])
+        for i in limits.indices where (limits[i]["kind"] as? String) == "weekly_all" {
+            limits[i]["percent"] = 1e300  // finite, but Int(1e300.rounded()) traps
+        }
+        payload["limits"] = limits
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        // weekly_all's percent is rejected -> entry skipped -> parser throws.
+        XCTAssertThrowsError(try parseClaude(data))
+    }
+
+    func testPresentButInvalidRemainingSkipsBucket() {
+        // remainingFraction -1e300 fails the raw bound; the bucket must be
+        // skipped, not silently rendered as 0% "untouched".
+        let json = #"{"response": {"groups": [{"displayName": "Gemini Models", "buckets": "#
+            + #"[{"window": "weekly", "resetTime": "2026-08-24T09:00:00Z", "remainingFraction": -1e300}]}]}}"#
+        XCTAssertThrowsError(try parseAntigravity(Data(json.utf8)))
+    }
+
+    func testDerivedPercentOverflowRejected() {
+        // -9e14 passes the raw bound but derives pct ≈ 9e17 — reject at
+        // construction, never hand it to an Int() render site.
+        let json = #"{"response": {"groups": [{"displayName": "Gemini Models", "buckets": "#
+            + #"[{"window": "weekly", "resetTime": "2026-08-24T09:00:00Z", "remainingFraction": -9e14}]}]}}"#
+        XCTAssertThrowsError(try parseAntigravity(Data(json.utf8)))
+    }
+
+    func testMillisecondEpochsStillAccepted() throws {
+        // Cursor billing-cycle epochs are milliseconds (~1.8e12) — the
+        // absurdity bound must not reject them.
+        let out = try parseCursor(fixture("cursor_usage"))
+        XCTAssertNotNil(out["monthly_auto"])
     }
 }

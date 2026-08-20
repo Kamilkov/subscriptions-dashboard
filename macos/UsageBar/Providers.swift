@@ -149,60 +149,6 @@ enum Providers {
         return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
-    // MARK: - Gemini
-
-    // gemini-cli's public OAuth client (shipped in its open source), used only
-    // to refresh the user's own token from ~/.gemini/oauth_creds.json.
-    private static let geminiClientID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-    private static let geminiClientSecret = "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"
-
-    static func readGeminiCreds() throws -> (refreshToken: String, projectID: String) {
-        let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini")
-        guard let creds = (try? JSONSerialization.jsonObject(
-                with: Data(contentsOf: dir.appendingPathComponent("oauth_creds.json")))) as? [String: Any],
-              let refresh = creds["refresh_token"] as? String, !refresh.isEmpty else {
-            throw FetchError.auth("gemini oauth_creds.json missing")
-        }
-        // projects.json maps workspace path -> project id; quota is per user,
-        // so any project id works.
-        guard let obj = (try? JSONSerialization.jsonObject(
-                with: Data(contentsOf: dir.appendingPathComponent("projects.json")))) as? [String: Any],
-              let projects = obj["projects"] as? [String: String],
-              let pid = projects.values.first, !pid.isEmpty else {
-            throw FetchError.auth("gemini projects.json missing — run gemini once")
-        }
-        return (refresh, pid)
-    }
-
-    private static func refreshGeminiToken(_ refreshToken: String) async throws -> String {
-        var req = URLRequest(url: URL(string: "https://oauth2.googleapis.com/token")!)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        var comps = URLComponents()
-        comps.queryItems = [
-            URLQueryItem(name: "client_id", value: geminiClientID),
-            URLQueryItem(name: "client_secret", value: geminiClientSecret),
-            URLQueryItem(name: "refresh_token", value: refreshToken),
-            URLQueryItem(name: "grant_type", value: "refresh_token"),
-        ]
-        req.httpBody = comps.percentEncodedQuery.map { Data($0.utf8) }
-        let data = try await request(req)
-        guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let tok = obj["access_token"] as? String, !tok.isEmpty else {
-            throw FetchError.auth("gemini token refresh failed")
-        }
-        return tok
-    }
-
-    static func fetchGemini() async throws -> [String: Limit] {
-        let (refresh, pid) = try readGeminiCreds()
-        let tok = try await refreshGeminiToken(refresh)
-        let data = try await postJSON("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-                                      headers: ["Authorization": "Bearer \(tok)"],
-                                      body: ["project": pid])
-        return try parseGemini(data)
-    }
-
     // MARK: - Copilot
 
     static func readCopilotToken(path: URL? = nil) throws -> String {

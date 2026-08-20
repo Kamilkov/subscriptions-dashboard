@@ -14,8 +14,8 @@ sit-down session — legibility at a glance matters more than exploration.
 
 ## Product Purpose
 
-A private, local-only monitor of AI-subscription usage (Claude, Codex, Cursor)
-against time. It reads each service's own usage API, normalizes every limit into
+A private, local-only monitor of AI-subscription usage (Claude, Codex, Cursor,
+Antigravity, Copilot) against time. It reads each service's own usage API, normalizes every limit into
 a window with a reset, and shows pace (used vs. elapsed) so overspend is visible
 before the window runs out. Success = the user can tell in under two seconds
 whether anything needs attention, without reading numbers one by one.

@@ -29,6 +29,12 @@ enum Pace: String, Sendable {
     var rank: Int { self == .over ? 0 : self == .on ? 1 : 2 }
 }
 
+// Merged-board spec: lanes sorted worst pace first (over → on → under),
+// tiebreak soonest reset — globally within a cadence group, no clustering.
+func worseLane(_ a: (pace: Pace, reset: Double), _ b: (pace: Pace, reset: Double)) -> Bool {
+    (a.pace.rank, a.reset) < (b.pace.rank, b.reset)
+}
+
 struct Limit: Equatable, Sendable {
     var pct: Double
     var resetEpoch: Double
@@ -69,13 +75,52 @@ func isoToEpoch(_ s: String) -> Double? {
     return fmt.date(from: str)?.timeIntervalSince1970
 }
 
+// MARK: - board background contrast
+
+// PRODUCT.md contract: body text ≥ 4.5:1 contrast in both themes. A board
+// background is accepted only if it keeps that ratio against the theme's ink
+// (#1c1c1e light / #f5f5f7 dark). WCAG 2.x relative luminance. The board tint
+// renders at 0.55 opacity over material whose luminance also passes, so
+// validating the raw tint is conservative.
+// Strict "RRGGBB" parse. Scanner accepts a valid prefix ("FF000Z" scans as
+// 0xFF000 and reports success), so the scanner must also consume the whole
+// string. Every hex-colour reader goes through this.
+func hexRGBValue(_ hex: String) -> UInt64? {
+    var v: UInt64 = 0
+    let sc = Scanner(string: hex)
+    guard hex.count == 6, sc.scanHexInt64(&v), sc.isAtEnd else { return nil }
+    return v
+}
+
+func bgContrastOK(_ hex: String, dark: Bool) -> Bool {
+    func lum(_ h: String) -> Double? {
+        guard let v = hexRGBValue(h) else { return nil }
+        let c = [Double((v >> 16) & 0xFF), Double((v >> 8) & 0xFF), Double(v & 0xFF)].map { x -> Double in
+            let s = x / 255
+            return s <= 0.03928 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    }
+    guard let l = lum(hex), let ink = lum(dark ? "F5F5F7" : "1C1C1E") else { return false }
+    return (max(l, ink) + 0.05) / (min(l, ink) + 0.05) >= 4.5
+}
+
 // MARK: - loose-JSON helpers (vendor payloads mix Int/Double/String for numbers)
 
 private func num(_ v: Any?) -> Double? {
-    // isFinite: Double("NaN")/"inf" parse successfully, and a non-finite pct
-    // traps later in Int(pct.rounded()) — reject at the boundary instead.
+    // Reject non-finite AND finite-but-absurd values: Double("NaN")/"inf" parse
+    // successfully, and a finite 1e300 pct traps later in Int(pct.rounded()) at
+    // render sites. 1e15 clears real epochs (Cursor's ms epochs ≈ 1.8e12) with
+    // headroom, and caps every derived value far below Int.max.
     let d: Double? = (v as? NSNumber)?.doubleValue ?? (v as? String).flatMap(Double.init)
-    return d?.isFinite == true ? d : nil
+    guard let d, d.isFinite, abs(d) < 1e15 else { return nil }
+    return d
+}
+
+// Derived percentages (products of raw-validated inputs) go through the same
+// bound at construction — raw bounds alone don't cap products.
+private func validPct(_ d: Double) -> Double? {
+    d.isFinite && abs(d) < 1e15 ? d : nil
 }
 
 private func jsonObject(_ data: Data) throws -> [String: Any] {
@@ -215,33 +260,6 @@ func parseCursor(_ data: Data) throws -> [String: Limit] {
     return ["monthly_auto": meter(auto), "monthly_api": meter(api)]
 }
 
-// MARK: - Gemini
-
-let daySeconds: Double = 86400
-
-func parseGemini(_ data: Data) throws -> [String: Limit] {
-    // Per-model daily request quotas from cloudcode-pa retrieveUserQuota.
-    // remainingAmount (and sometimes remainingFraction) is omitted when the
-    // quota is untouched — a missing fraction means 100% remaining, not 0.
-    let payload = try jsonObject(data)
-    guard let buckets = payload["buckets"] as? [[String: Any]] else {
-        throw FetchError.parse("gemini payload: no buckets")
-    }
-    var out: [String: Limit] = [:]
-    for b in buckets {
-        guard let model = b["modelId"] as? String,
-              let resets = b["resetTime"] as? String, let epoch = isoToEpoch(resets) else { continue }
-        let remaining = num(b["remainingFraction"]) ?? 1.0
-        let pct = ((1.0 - remaining) * 1000).rounded() / 10
-        out[model] = Limit(pct: pct, resetEpoch: epoch, windowSeconds: daySeconds,
-                           blocked: remaining <= 0)
-    }
-    guard !out.isEmpty else {
-        throw FetchError.parse("gemini payload: no usable buckets")
-    }
-    return out
-}
-
 // MARK: - Copilot
 
 let monthSeconds: Double = 30 * 86400
@@ -260,8 +278,9 @@ func parseCopilot(_ data: Data) throws -> [String: Limit] {
     var out: [String: Limit] = [:]
     for (lane, raw) in (payload["quota_snapshots"] as? [String: [String: Any]]) ?? [:] {
         guard (raw["has_quota"] as? Bool) == true,
-              let remaining = num(raw["percent_remaining"]) else { continue }
-        out[lane] = Limit(pct: ((100 - remaining) * 10).rounded() / 10,
+              let remaining = num(raw["percent_remaining"]),
+              let pct = validPct(((100 - remaining) * 10).rounded() / 10) else { continue }
+        out[lane] = Limit(pct: pct,
                           resetEpoch: epoch, windowSeconds: monthSeconds,
                           blocked: (num(raw["remaining"]) ?? 1) <= 0,
                           name: copilotNames[lane] ?? lane)
@@ -292,9 +311,18 @@ func parseAntigravity(_ data: Data) throws -> [String: Limit] {
             guard let win = b["window"] as? String, let w = windows[win],
                   let resets = b["resetTime"] as? String,
                   let epoch = isoToEpoch(resets) else { continue }
-            let remaining = num(b["remainingFraction"]) ?? 1.0  // omitted = untouched
+            // Omitted fraction = untouched (100% remaining). Present-but-garbage
+            // is NOT untouched — skip the bucket rather than render 0%.
+            let remaining: Double
+            if let raw = b["remainingFraction"] {
+                guard let r = num(raw) else { continue }
+                remaining = r
+            } else {
+                remaining = 1.0
+            }
+            guard let pct = validPct(((1.0 - remaining) * 1000).rounded() / 10) else { continue }
             out["\(w.label) - \(pool)"] = Limit(
-                pct: ((1.0 - remaining) * 1000).rounded() / 10,
+                pct: pct,
                 resetEpoch: epoch, windowSeconds: w.seconds,
                 blocked: remaining <= 0)
         }

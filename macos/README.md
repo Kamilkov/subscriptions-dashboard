@@ -1,13 +1,16 @@
 # UsageBar — macOS menu-bar app
 
-Native Swift port of `dashboard.py`. Lives in the menu bar, shows the worst
+Native Swift port of `dashboard.py`, covering the same five providers (Claude
+Code, Codex, Cursor, Antigravity, GitHub Copilot). Lives in the menu bar, shows the worst
 lane's usage %; click for the full board (rolling / weekly / monthly lanes,
 pace badges, projections). "Open Window" in the popover opens the same board
 as a resizable standalone window that scales with its size — meant for a
 dedicated/secondary display. Polls every 20 min, history in
 `~/Library/Application Support/UsageBar/history.jsonl` (60-day retention).
 Tokens are read at fetch time from the same places the CLIs keep them
-(Keychain, `~/.codex/auth.json`, Cursor's `state.vscdb`) and never stored.
+(Keychain, `~/.codex/auth.json`, Cursor's `state.vscdb`, Antigravity's local
+language server, Copilot's `~/.config/github-copilot/apps.json`) and never
+stored.
 
 A widget (small/medium/large) shows the board on the desktop / Notification
 Center: the app writes each poll's snapshot to the App Group container
@@ -44,7 +47,7 @@ xcodebuild -project UsageBar.xcodeproj -scheme UsageBar test -destination 'platf
   `gh release create v<version> dist/UsageBar-<version>.zip dist/appcast.xml`.
   The EdDSA private key lives in the login Keychain ("Private key for signing
   Sparkle updates"); the public key is in the app's Info.plist.
-- **Canary:** `../canary.py` probes all four providers daily at 09:30
+- **Canary:** `../canary.py` probes all five providers daily at 09:30
   (`../install-canary.sh` installs the launchd agent) and fires a macOS
   notification on payload drift, so parser breakage is known before users
   report it.

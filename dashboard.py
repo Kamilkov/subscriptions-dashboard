@@ -26,9 +26,9 @@ POLL_SECONDS = 20 * 60      # background poll cadence
 HISTORY_DAYS = 60           # retention
 BASE_DIR = Path(__file__).resolve().parent
 HISTORY_PATH = BASE_DIR / "history.jsonl"
-# "gemini" (gemini-cli quota) retired 2026-08: Kamil doesn't use the CLI, and
-# its endpoint never reflects Antigravity usage. Code kept — re-add here (and
-# in the JS service list + refresh fetchers) if gemini-cli comes back.
+# "gemini" (gemini-cli quota) retired 2026-08, implementation removed
+# 2026-08-20 — revive from git history if gemini-cli ever comes back.
+# (Antigravity's "Gemini" POOL label is unrelated and stays.)
 SERVICES = ("claude", "codex", "cursor", "antigravity", "copilot")
 CURSOR_DB = Path.home() / "Library/Application Support/Cursor/User/globalStorage/state.vscdb"
 
@@ -42,11 +42,14 @@ def epoch_to_iso(e):
 
 
 def _num(v):
-    """float() that rejects non-finite values: float("NaN")/"inf" succeed, and
-    a NaN percent would render as garbage and break json.dumps of /api."""
+    """float() that rejects non-finite or absurd values: float("NaN")/"inf"
+    succeed, a NaN percent renders as garbage, and a finite 1e300 would trap
+    the Swift port's Int() render sites — reject both at the boundary. Derived
+    percentages are re-validated through this too (raw bounds don't cap
+    products). 1e15 clears real epochs (Cursor's ms epochs ~1.8e12)."""
     f = float(v)
-    if f != f or f in (float("inf"), float("-inf")):
-        raise ValueError("non-finite number")
+    if f != f or abs(f) >= 1e15:
+        raise ValueError("non-finite or absurd number")
     return f
 
 
@@ -170,78 +173,6 @@ def parse_cursor(payload):
     return {"monthly_auto": meter(auto), "monthly_api": meter(api)}
 
 
-DAY_SECONDS = 86400.0
-
-
-def parse_gemini(payload):
-    """Per-model daily request quotas from cloudcode-pa retrieveUserQuota.
-    remainingFraction is omitted when the quota is untouched — a missing
-    fraction means 100% remaining, not 0."""
-    out = {}
-    try:
-        for b in payload["buckets"]:
-            model, resets = b.get("modelId"), b.get("resetTime")
-            if not model or not resets:
-                continue
-            remaining = _num(b["remainingFraction"]) if "remainingFraction" in b else 1.0
-            out[model] = {"pct": round((1.0 - remaining) * 1000) / 10,
-                          "resets_at": resets,
-                          "window_seconds": DAY_SECONDS,
-                          "blocked": remaining <= 0}
-    except (KeyError, TypeError, ValueError) as e:
-        raise FetchError("parse", f"gemini payload: {e.__class__.__name__}")
-    if not out:
-        raise FetchError("parse", "gemini payload: no usable buckets")
-    return out
-
-
-# gemini-cli's public OAuth client (shipped in its open source), used only to
-# refresh the user's own token from ~/.gemini/oauth_creds.json.
-GEMINI_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-GEMINI_CLIENT_SECRET = "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"
-
-
-def read_gemini_creds():
-    home = Path.home() / ".gemini"
-    try:
-        refresh = json.loads((home / "oauth_creds.json").read_text())["refresh_token"]
-        # projects.json maps workspace -> project id; quota is per user, so any
-        # project id works.
-        projects = json.loads((home / "projects.json").read_text())["projects"]
-        pid = next(iter(projects.values()))
-    except (OSError, KeyError, ValueError, TypeError, StopIteration):
-        raise FetchError("auth", "gemini creds missing — run gemini once")
-    if not refresh or not pid:
-        raise FetchError("auth", "gemini creds missing — run gemini once")
-    return refresh, pid
-
-
-def refresh_gemini_token(refresh_token, opener=urllib.request.urlopen):
-    body = urllib.parse.urlencode({
-        "client_id": GEMINI_CLIENT_ID, "client_secret": GEMINI_CLIENT_SECRET,
-        "refresh_token": refresh_token, "grant_type": "refresh_token"}).encode()
-    try:
-        with opener(urllib.request.Request("https://oauth2.googleapis.com/token",
-                                           data=body), timeout=20) as r:
-            tok = json.loads(r.read())["access_token"]
-    except Exception as e:
-        raise FetchError("auth", f"gemini token refresh failed: {e.__class__.__name__}")
-    if not tok:
-        raise FetchError("auth", "gemini token refresh failed: empty token")
-    return tok
-
-
-def fetch_gemini(read_creds=None, refresh=None, post=None):
-    read_creds = read_creds or read_gemini_creds
-    refresh = refresh or refresh_gemini_token
-    post = post or http_post_json
-    refresh_token, pid = read_creds()
-    tok = refresh(refresh_token)
-    payload = post("https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuota",
-                   {"Authorization": f"Bearer {tok}"}, {"project": pid})
-    return parse_gemini(payload)
-
-
 def parse_antigravity(payload):
     """Per-group weekly + 5-hour pools from Antigravity's local language
     server (RetrieveUserQuotaSummary). Quota is metered per model *group*
@@ -260,7 +191,7 @@ def parse_antigravity(payload):
                 label, secs = windows[win]
                 remaining = _num(b["remainingFraction"]) if "remainingFraction" in b else 1.0
                 out[f"{label} - {pool}"] = {
-                    "pct": round((1.0 - remaining) * 1000) / 10,
+                    "pct": _num(round((1.0 - remaining) * 1000) / 10),  # derived re-validated
                     "resets_at": resets, "window_seconds": secs,
                     "blocked": remaining <= 0}
     except (KeyError, TypeError, ValueError) as e:
@@ -399,11 +330,23 @@ def read_codex_creds(path=None):
     return token, acct
 
 
-def http_get_json(url, headers, opener=urllib.request.urlopen):
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse ALL redirects: urllib re-sends the original headers (Authorization,
+    Cookie) to the Location target, cross-origin included. Every vendor endpoint
+    answers 200 directly, so any 3xx is unexpected and fails as network."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # parent handler then raises HTTPError(3xx)
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
+def http_get_json(url, headers, opener=_OPENER.open):
     return _http_json(url, headers, None, opener)
 
 
-def http_post_json(url, headers, body, opener=urllib.request.urlopen):
+def http_post_json(url, headers, body, opener=_OPENER.open):
     headers = dict(headers)
     headers.setdefault("Content-Type", "application/json")
     return _http_json(url, headers, json.dumps(body).encode(), opener)
@@ -469,9 +412,10 @@ def parse_copilot(payload):
             continue
         try:
             remaining = _num(q["percent_remaining"])
+            pct = _num(round(100 - remaining, 1))  # derived re-validated
         except (KeyError, TypeError, ValueError):
             continue
-        out[lane] = {"pct": round(100 - remaining, 1),
+        out[lane] = {"pct": pct,
                      "resets_at": f"{reset}T00:00:00Z",
                      "window_seconds": MONTH_SECONDS,
                      "name": COPILOT_NAMES.get(lane, lane),
@@ -590,8 +534,17 @@ def refresh(force=False, now_fn=time.time, fetchers=None, history_path=None):
                                    "detail": val.detail}
                     st["status"] = "stale" if st["data"] is not None else "never"
             HISTORY.append(snap)
+            # Retention holds continuously, not just at startup: drop expired
+            # snapshots each poll, compacting the file only when something fell off.
+            cutoff = now - HISTORY_DAYS * 86400
+            pruned = HISTORY[0]["ts_epoch"] < cutoff
+            if pruned:
+                HISTORY[:] = [s for s in HISTORY if s["ts_epoch"] >= cutoff]
             try:
-                append_history_line(history_path, snap)
+                if pruned:
+                    write_history(history_path, HISTORY)
+                else:
+                    append_history_line(history_path, snap)
             except OSError as e:
                 print(f"history append failed: {e.__class__.__name__}", file=sys.stderr)
 
@@ -828,14 +781,34 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
   const mq = matchMedia("(prefers-color-scheme: dark)");
   const pick = {light: document.getElementById("bgl"), dark: document.getElementById("bgd")};
   const key = (m) => m === "dark" ? "bgDark" : "bgLight";
+  // PRODUCT.md: body text ≥ 4.5:1 in both themes — accept a background only if
+  // it keeps that ratio against the theme's ink. WCAG 2.x relative luminance.
+  function bgOK(hex, dark) {
+    const lum = h => {
+      const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+        .map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
+    const l = lum(hex), ink = lum(dark ? "#f5f5f7" : "#1c1c1e");
+    return (Math.max(l, ink) + 0.05) / (Math.min(l, ink) + 0.05) >= 4.5;
+  }
   function apply() {
-    const c = localStorage.getItem(key(mq.matches ? "dark" : "light"));
-    if (c) document.documentElement.style.setProperty("--page", c);
+    const m = mq.matches ? "dark" : "light";
+    const c = localStorage.getItem(key(m));
+    // A stored value that fails the rule (persisted before it existed) is
+    // never applied — the stylesheet default rules instead.
+    if (c && bgOK(c, m === "dark")) document.documentElement.style.setProperty("--page", c);
     else document.documentElement.style.removeProperty("--page");
   }
   for (const m of ["light", "dark"]) {
     pick[m].value = localStorage.getItem(key(m)) || DEF[m];
-    pick[m].addEventListener("input", () => { localStorage.setItem(key(m), pick[m].value); apply(); });
+    pick[m].addEventListener("input", () => {
+      if (!bgOK(pick[m].value, m === "dark")) {          // reject: snap back
+        pick[m].value = localStorage.getItem(key(m)) || DEF[m];
+        return;
+      }
+      localStorage.setItem(key(m), pick[m].value); apply();
+    });
   }
   document.getElementById("bgreset").addEventListener("click", () => {
     for (const m of ["light", "dark"]) { localStorage.removeItem(key(m)); pick[m].value = DEF[m]; }
@@ -855,7 +828,6 @@ const RANK = {over: 0, on: 1, under: 2};
 const STALE_FIX = {claude: "Token stale — open Claude Code once",
                    codex: "Token stale — run codex once",
                    cursor: "Token stale — open Cursor once",
-                   gemini: "Token stale — run gemini once",
                    antigravity: "Antigravity not running — open it to see usage",
                    copilot: "Token stale — sign into Copilot once"};
 
@@ -1067,16 +1039,9 @@ function render(data) {
     const items = limits.filter(it => bucketOf(it.d.window_seconds) === key);
     const idle = key === "rolling" && sessionIdle ? idleLane() : "";
     if (!items.length && !idle) continue;
-    // Cluster lanes by provider: providers ordered by their worst lane (rank,
-    // then usage), lanes worst-first inside the cluster. Keeps "worst on top"
-    // at the provider level while same-provider lanes stay adjacent.
-    const worst = {};
-    for (const it of items) {
-      const k = RANK[it.d.pace] + (100 - it.d.pct) / 1000;  // rank dominates, pct tie-breaks
-      if (!(it.svc in worst) || k < worst[it.svc]) worst[it.svc] = k;
-    }
-    items.sort((a, b) => (worst[a.svc] - worst[b.svc]) || a.svc.localeCompare(b.svc)
-      || (RANK[a.d.pace] - RANK[b.d.pace]) || (a.d.reset_epoch - b.d.reset_epoch));
+    // Merged-board spec: worst pace first (over → on → under), tiebreak
+    // soonest reset — global order within the group, no provider clustering.
+    items.sort((a, b) => (RANK[a.d.pace] - RANK[b.d.pace]) || (a.d.reset_epoch - b.d.reset_epoch));
     html += '<div class="group"><div class="group-h"><span class="t">' + title +
       '</span><span class="hint">' + hint + '</span></div>';
     if (items.length) {
@@ -1189,14 +1154,34 @@ actually use. Short bars week after week mean headroom you're not touching.</p>
   const mq = matchMedia("(prefers-color-scheme: dark)");
   const pick = {light: document.getElementById("bgl"), dark: document.getElementById("bgd")};
   const key = (m) => m === "dark" ? "bgDark" : "bgLight";
+  // PRODUCT.md: body text ≥ 4.5:1 in both themes — accept a background only if
+  // it keeps that ratio against the theme's ink. WCAG 2.x relative luminance.
+  function bgOK(hex, dark) {
+    const lum = h => {
+      const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+        .map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+      return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+    };
+    const l = lum(hex), ink = lum(dark ? "#f5f5f7" : "#1c1c1e");
+    return (Math.max(l, ink) + 0.05) / (Math.min(l, ink) + 0.05) >= 4.5;
+  }
   function apply() {
-    const c = localStorage.getItem(key(mq.matches ? "dark" : "light"));
-    if (c) document.documentElement.style.setProperty("--page", c);
+    const m = mq.matches ? "dark" : "light";
+    const c = localStorage.getItem(key(m));
+    // A stored value that fails the rule (persisted before it existed) is
+    // never applied — the stylesheet default rules instead.
+    if (c && bgOK(c, m === "dark")) document.documentElement.style.setProperty("--page", c);
     else document.documentElement.style.removeProperty("--page");
   }
   for (const m of ["light", "dark"]) {
     pick[m].value = localStorage.getItem(key(m)) || DEF[m];
-    pick[m].addEventListener("input", () => { localStorage.setItem(key(m), pick[m].value); apply(); });
+    pick[m].addEventListener("input", () => {
+      if (!bgOK(pick[m].value, m === "dark")) {          // reject: snap back
+        pick[m].value = localStorage.getItem(key(m)) || DEF[m];
+        return;
+      }
+      localStorage.setItem(key(m), pick[m].value); apply();
+    });
   }
   document.getElementById("bgreset").addEventListener("click", () => {
     for (const m of ["light", "dark"]) { localStorage.removeItem(key(m)); pick[m].value = DEF[m]; }
@@ -1378,8 +1363,8 @@ def limit_paths(service, data):
     if service == "cursor":
         # "monthly" kept so stale pre-2026-08 snapshots still render
         return [(k, [k]) for k in ("monthly_auto", "monthly_api", "monthly") if k in data]
-    if service in ("gemini", "antigravity", "copilot"):
-        return [(k, [k]) for k in sorted(data)]  # one lane per modelId / pool / quota
+    if service in ("antigravity", "copilot"):
+        return [(k, [k]) for k in sorted(data)]  # one lane per pool / quota
     paths = [("rolling", ["rolling"])] if "rolling" in data else []
     paths += [("weekly", ["weekly"])] if "weekly" in data else []
     paths += [(name, ["models", name]) for name in sorted(data.get("models") or {})]
@@ -1504,6 +1489,17 @@ def append_history_line(path, snap):
         f.flush()
 
 
+def write_history(path, snaps):
+    """Atomically rewrite the whole history file (tmp + rename)."""
+    p = Path(path)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w") as f:
+        for rec in snaps:
+            f.write(json.dumps({k: v for k, v in rec.items() if k != "ts_epoch"},
+                               separators=(",", ":")) + "\n")
+    tmp.replace(p)
+
+
 def load_history(path, now_fn=time.time):
     p = Path(path)
     if not p.exists():
@@ -1523,12 +1519,7 @@ def load_history(path, now_fn=time.time):
             continue
         rec["ts_epoch"] = ts
         kept.append(rec)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w") as f:
-        for rec in kept:
-            f.write(json.dumps({k: v for k, v in rec.items() if k != "ts_epoch"},
-                               separators=(",", ":")) + "\n")
-    tmp.replace(p)
+    write_history(p, kept)
     return kept
 
 
