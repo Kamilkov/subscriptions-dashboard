@@ -612,13 +612,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
   color-scheme: light dark;
   --page:#f1f1f4; --panel:#ffffff; --ink:#1c1c1e; --muted:#6b6b70; --faint:#98989d;
   --line:#e4e4e9; --track:#e9e9ee; --use:#0071e3;
-  --under:#1f9d4d; --on:#a65a00; --over:#d70015;
+  --under:#a65a00; --on:#1f9d4d; --over:#d70015;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root { --page:#151517; --panel:#1e1e20; --ink:#f5f5f7; --muted:#9a9aa0; --faint:#6f6f75;
           --line:#2c2c2f; --track:#2a2a2e;
-          --under:#30d158; --on:#ff9f0a; --over:#ff453a; }
+          --under:#ff9f0a; --on:#30d158; --over:#ff453a; }
 }
 * { box-sizing:border-box; margin:0; }
 body { background:var(--page); color:var(--ink); padding:32px 20px;

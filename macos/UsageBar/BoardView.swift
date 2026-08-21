@@ -48,8 +48,8 @@ private func midnights(start: Double, end: Double) -> [Double] {
 private extension Pace {
     var color: Color {
         switch self {
-        case .under: Color(red: 0.19, green: 0.62, blue: 0.30)
-        case .on: Color(red: 0.75, green: 0.42, blue: 0.0)
+        case .under: Color(red: 0.75, green: 0.42, blue: 0.0)
+        case .on: Color(red: 0.19, green: 0.62, blue: 0.30)
         case .over: Color(red: 0.84, green: 0.0, blue: 0.08)
         }
     }

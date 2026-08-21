@@ -78,8 +78,8 @@ private func ageText(_ s: Double) -> String {
 private extension Pace {
     var color: Color {
         switch self {
-        case .under: Color(red: 0.19, green: 0.72, blue: 0.35)
-        case .on: Color(red: 1.0, green: 0.62, blue: 0.04)
+        case .under: Color(red: 1.0, green: 0.62, blue: 0.04)
+        case .on: Color(red: 0.19, green: 0.72, blue: 0.35)
         case .over: Color(red: 1.0, green: 0.28, blue: 0.24)
         }
     }
