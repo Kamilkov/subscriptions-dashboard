@@ -827,6 +827,30 @@ class TestRefresh(unittest.TestCase):
         dashboard.refresh(force=False, fetchers=self.fetchers(), history_path=self.hpath)
         self.assertEqual(len(self.hpath.read_text().splitlines()), 1)
 
+    def test_unforced_refresh_inside_poll_interval_does_not_fetch(self):
+        # The page ticks /api/usage every 5 min. That must not punch through
+        # to vendors more often than the 20-min background poll (Claude's
+        # oauth/usage endpoint 429s when unofficial clients poll too often).
+        import dashboard
+        counter = {}
+        fetchers = self.fetchers(counter=counter)
+        t = {"now": 1_000_000.0}
+        dashboard.refresh(force=True, now_fn=lambda: t["now"], fetchers=fetchers,
+                          history_path=self.hpath)
+        self.assertEqual(counter["claude"], 1)
+        t["now"] += 5 * 60
+        dashboard.refresh(force=False, now_fn=lambda: t["now"], fetchers=fetchers,
+                          history_path=self.hpath)
+        self.assertEqual(counter["claude"], 1, "5-min page tick must serve cache")
+        t["now"] = 1_000_000.0 + dashboard.POLL_SECONDS - 1
+        dashboard.refresh(force=False, now_fn=lambda: t["now"], fetchers=fetchers,
+                          history_path=self.hpath)
+        self.assertEqual(counter["claude"], 1)
+        t["now"] = 1_000_000.0 + dashboard.POLL_SECONDS
+        dashboard.refresh(force=False, now_fn=lambda: t["now"], fetchers=fetchers,
+                          history_path=self.hpath)
+        self.assertEqual(counter["claude"], 2)
+
     def test_auth_failure_marks_stale_keeps_other_service(self):
         import dashboard
         dashboard.refresh(force=True, fetchers=self.fetchers(), history_path=self.hpath)

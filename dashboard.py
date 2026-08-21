@@ -21,8 +21,8 @@ from pathlib import Path
 
 WEEK_SECONDS = 7 * 24 * 3600
 DEFAULT_PORT = 8787
-FRESH_SECONDS = 60          # cache freshness for page-triggered refresh
 POLL_SECONDS = 20 * 60      # background poll cadence
+FRESH_SECONDS = POLL_SECONDS  # page-triggered refresh must not outpace the poll
 HISTORY_DAYS = 60           # retention
 BASE_DIR = Path(__file__).resolve().parent
 HISTORY_PATH = BASE_DIR / "history.jsonl"
