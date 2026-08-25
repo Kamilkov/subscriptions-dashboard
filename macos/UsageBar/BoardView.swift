@@ -382,7 +382,7 @@ struct BoardView: View {
         store.enabledServices.compactMap { svc in
             let st = store.states[svc]!
             guard let err = st.error, !st.lanes.isEmpty else { return nil }
-            return err.category == "auth" ? staleFix(svc) : "Can't reach \(svc) (\(err.category))"
+            return err.category == "auth" ? staleFix(svc) : "Can't reach \(svc) (\(err.category): \(err.detail))"
         }
     }
 
@@ -391,7 +391,7 @@ struct BoardView: View {
             let st = store.states[svc]!
             guard st.lanes.isEmpty else { return nil }
             if let err = st.error, err.category == "auth" { return staleFix(svc) }
-            return "\(svc) — no data yet" + (st.error.map { " (\($0.category))" } ?? "")
+            return "\(svc) — no data yet" + (st.error.map { " (\($0.category): \($0.detail))" } ?? "")
         }
     }
 

@@ -894,12 +894,12 @@ function openBtn(svc, err) {  // "not running" is fixable with one click
 }
 function errorLine(svc, err) {  // service has data but is stale/errored
   const msg = err.category === "auth" ? STALE_FIX[svc]
-            : "Can't reach " + svc + " (" + err.category + ")";
+            : "Can't reach " + svc + " (" + err.category + (err.detail ? ": " + err.detail : "") + ")";
   return '<p class="errline" role="alert">' + esc(msg) + openBtn(svc, err) + '</p>';
 }
 function unavailLine(svc, err) {  // service has no data at all
   const msg = (err && err.category === "auth") ? STALE_FIX[svc]
-            : svc + " — no data yet" + (err ? " (" + err.category + ")" : "");
+            : svc + " — no data yet" + (err ? " (" + err.category + (err.detail ? ": " + err.detail : "") + ")" : "");
   return '<p class="unavail">' + esc(msg) + openBtn(svc, err) + '</p>';
 }
 function axisRow(key, m) {
