@@ -1,5 +1,6 @@
 .env
 history.jsonl
+shapes.json
 __pycache__/
 macos/UsageBar.xcodeproj/
 macos/dist/

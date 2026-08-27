@@ -131,6 +131,17 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(out.count, 2)
     }
 
+    func testPayloadShapeAndDrift() throws {
+        let obj: [String: Any] = ["b": ["y": 1, "x": ["deep": 1]], "a": [1, 2], "t": "tok"]
+        XCTAssertEqual(payloadShape(obj), ["a", "b", "b.x", "b.y", "t"])  // depth 2, keys only
+        var store: [String: [String]] = [:]
+        XCTAssertNil(noteShape(key: "u", shape: ["a", "b"], store: &store))  // baseline
+        XCTAssertNil(noteShape(key: "u", shape: ["a", "b"], store: &store))
+        XCTAssertEqual(noteShape(key: "u", shape: ["b", "c"], store: &store),
+                       ShapeDrift(added: ["c"], removed: ["a"]))
+        XCTAssertEqual(store["u"], ["b", "c"])
+    }
+
     func testParseCursorGrok() throws {
         let out = try parseCursorGrok(fixture("cursor_sand_usage"))
         XCTAssertEqual(out.pct, 2.7)

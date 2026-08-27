@@ -7,6 +7,7 @@ Stdlib only. Serves 127.0.0.1:8787. Tokens are never stored or logged.
 import argparse
 import base64
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -26,6 +27,8 @@ FRESH_SECONDS = POLL_SECONDS  # page-triggered refresh must not outpace the poll
 HISTORY_DAYS = 60           # retention
 BASE_DIR = Path(__file__).resolve().parent
 HISTORY_PATH = BASE_DIR / "history.jsonl"
+SHAPES_PATH = BASE_DIR / "shapes.json"  # per-endpoint key-path baselines (never values)
+DRIFT_DAYS = 7
 # "gemini" (gemini-cli quota) retired 2026-08, implementation removed
 # 2026-08-20 — revive from git history if gemini-cli ever comes back.
 # (Antigravity's "Gemini" POOL label is unrelated and stays.)
@@ -367,6 +370,60 @@ def http_post_json(url, headers, body, opener=_OPENER.open):
     return _http_json(url, headers, json.dumps(body).encode(), opener)
 
 
+def payload_shape(obj, prefix="", depth=2):
+    """Sorted key paths, two levels deep — the fingerprint an endpoint change
+    shows up in. Keys only, never values (payloads carry tokens).
+    ponytail: dynamic-keyed maps (Codex models) churn this; tolerated, a new
+    model showing up is worth a glance anyway."""
+    keys = []
+    if isinstance(obj, dict) and depth > 0:
+        for k in sorted(obj):
+            keys.append(prefix + str(k))
+            keys += payload_shape(obj[k], prefix + str(k) + ".", depth - 1)
+    return keys
+
+
+def note_shape(url, payload, path=None, now_fn=time.time):
+    """Compare a payload's shape with the stored baseline for its endpoint.
+    First sighting just records; a later change records added/removed keys
+    with a timestamp (surfaced by recent_drift) and logs to stderr."""
+    path = path or SHAPES_PATH
+    key = re.sub(r":\d+", "", url)  # Antigravity's port changes per launch
+    shape = payload_shape(payload)
+    try:
+        shapes = json.loads(path.read_text())
+    except (OSError, ValueError):
+        shapes = {}
+    old = shapes.get(key, {}).get("keys")
+    if old == shape:
+        return None
+    entry = {"keys": shape}
+    if old is not None:
+        entry.update(changed_at=epoch_to_iso(now_fn()),
+                     added=sorted(set(shape) - set(old)), removed=sorted(set(old) - set(shape)))
+        print(f"payload drift {key}: +{entry['added']} -{entry['removed']}", file=sys.stderr)
+    shapes[key] = entry
+    try:
+        path.write_text(json.dumps(shapes, indent=1))
+    except OSError:
+        pass
+    return entry if old is not None else None
+
+
+def recent_drift(now, path=None):
+    """Endpoint shape changes within DRIFT_DAYS — self-expiring, no dismiss needed."""
+    try:
+        shapes = json.loads((path or SHAPES_PATH).read_text())
+    except (OSError, ValueError):
+        return []
+    out = []
+    for url, e in sorted(shapes.items()):
+        if e.get("changed_at") and now - iso_to_epoch(e["changed_at"]) < DRIFT_DAYS * 86400:
+            out.append({"url": url, "changed_at": e["changed_at"],
+                        "added": e.get("added", []), "removed": e.get("removed", [])})
+    return out
+
+
 def _http_json(url, headers, data, opener):
     req = urllib.request.Request(url, data=data, headers=headers)
     try:
@@ -381,9 +438,14 @@ def _http_json(url, headers, data, opener):
     except Exception as e:
         raise FetchError("network", e.__class__.__name__)
     try:
-        return json.loads(body)
+        payload = json.loads(body)
     except ValueError:
         raise FetchError("parse", "response is not valid JSON")
+    try:
+        note_shape(url, payload)
+    except Exception as e:  # drift bookkeeping must never break a fetch
+        print(f"note_shape failed: {e.__class__.__name__}", file=sys.stderr)
+    return payload
 
 
 def fetch_claude(read_token=None, get=None):
@@ -609,6 +671,7 @@ def api_payload(now_fn=time.time):
     return {**{s: public_state(states[s]) for s in SERVICES},
             "history": series,
             "derived": derived,
+            "drift": recent_drift(now),
             "server_time": epoch_to_iso(now)}
 
 
@@ -1054,6 +1117,10 @@ function render(data) {
                    d: d, stale: stale, age: age});
     }
   }
+  for (const d of data.drift || [])
+    top += '<p class="errline">Payload changed ' + esc(new Date(d.changed_at).toLocaleDateString(undefined, {day: "numeric", month: "short"})) + ' &middot; ' +
+      esc(d.url.replace(/^https?:\/\//, "")) + (d.added.length ? ' +' + esc(d.added.join(" ")) : "") +
+      (d.removed.length ? ' &minus;' + esc(d.removed.join(" ")) : "") + '</p>';
   let html = top;
   // Claude reports session as percent 0 / resets_at null between sessions;
   // keep the rolling group visible with a placeholder instead of vanishing.

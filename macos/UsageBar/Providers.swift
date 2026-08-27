@@ -25,7 +25,24 @@ enum Providers {
             }
             throw FetchError.network("HTTP \(http.statusCode)")
         }
+        recordShape(req.url!, data)
         return data
+    }
+
+    // Drift detection (port of dashboard.py note_shape): the endpoints are
+    // unofficial, so a changed key-set is the earliest signal that a parser
+    // is about to break — or that a new meter appeared. Keys only, no values.
+    private static func recordShape(_ url: URL, _ data: Data) {
+        guard let obj = try? JSONSerialization.jsonObject(with: data) else { return }
+        let key = url.absoluteString.replacingOccurrences(of: ":\\d+", with: "",
+                                                          options: .regularExpression)  // Antigravity port
+        var store = UserDefaults.standard.dictionary(forKey: "payloadShapes") as? [String: [String]] ?? [:]
+        if let d = noteShape(key: key, shape: payloadShape(obj), store: &store) {
+            let host = key.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
+            postNotification(title: "PAYLOAD CHANGED", body: "\(host)\n+\(d.added.joined(separator: " ")) −\(d.removed.joined(separator: " "))",
+                             id: "drift.\(host)")
+        }
+        UserDefaults.standard.set(store, forKey: "payloadShapes")
     }
 
     private static func getJSON(_ url: String, headers: [String: String]) async throws -> Data {

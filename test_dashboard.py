@@ -213,6 +213,32 @@ class TestParsers(unittest.TestCase):
         self.assertTrue(out["monthly_api"]["blocked"])
         self.assertFalse(out["monthly_auto"]["blocked"])
 
+    def test_payload_shape_and_drift(self):
+        import dashboard, tempfile
+        shape = dashboard.payload_shape({"b": {"y": 1, "x": {"deep": 1}}, "a": [1, 2], "t": "tok"})
+        self.assertEqual(shape, ["a", "b", "b.x", "b.y", "t"])  # depth 2, keys only
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "shapes.json"
+            now = lambda: 1_700_000_000.0
+            base = load_fixture("cursor_usage.json")
+            # first sighting: baseline only, no drift
+            self.assertIsNone(dashboard.note_shape("https://x/api/u", base, path, now))
+            self.assertIsNone(dashboard.note_shape("https://x/api/u", base, path, now))
+            self.assertEqual(dashboard.recent_drift(now(), path), [])
+            changed = dict(base, grokPlanLabel="Grok Bot Plan")
+            changed["planUsage"] = {k: v for k, v in base["planUsage"].items() if k != "bonusSpend"}
+            drift = dashboard.note_shape("https://x/api/u", changed, path, now)
+            self.assertEqual(drift["added"], ["grokPlanLabel"])
+            self.assertEqual(drift["removed"], ["planUsage.bonusSpend"])
+            recent = dashboard.recent_drift(now() + 86400, path)
+            self.assertEqual([(r["url"], r["added"]) for r in recent],
+                             [("https://x/api/u", ["grokPlanLabel"])])
+            self.assertEqual(dashboard.recent_drift(now() + 8 * 86400, path), [])  # expired
+            # Antigravity's per-launch port must not look like a new endpoint
+            dashboard.note_shape("http://127.0.0.1:4000/rpc", {"a": 1}, path, now)
+            self.assertIsNotNone(dashboard.note_shape("http://127.0.0.1:5000/rpc", {"b": 1}, path, now))
+            self.assertNotIn("tok", path.read_text())  # values never persisted
+
     def test_parse_cursor_grok(self):
         import dashboard
         out = dashboard.parse_cursor_grok(load_fixture("cursor_sand_usage.json"))
@@ -1012,7 +1038,7 @@ class TestApiPayload(unittest.TestCase):
         p = dashboard.api_payload(now_fn=lambda: now)
         self.assertEqual(sorted(p.keys()),
                          ["antigravity", "claude", "codex", "copilot", "cursor",
-                          "derived", "history", "server_time"])
+                          "derived", "drift", "history", "server_time"])
         self.assertEqual(p["claude"]["status"], "fresh")
         self.assertIsNone(p["claude"]["error"])
         d = p["derived"]["codex"]["weekly"]

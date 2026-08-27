@@ -355,6 +355,33 @@ func parseAntigravity(_ data: Data) throws -> [String: Limit] {
 // only when a lane CROSSES into a worse state between two polls (blocked,
 // OVER pace, or the 90% line). A lane first seen in a bad state stays quiet —
 // prev is unknown, and relaunch would otherwise replay old alerts.
+// MARK: - payload drift
+
+// Sorted key paths two levels deep — the fingerprint an endpoint change shows
+// up in. Keys only, never values (payloads carry tokens). Port of payload_shape.
+func payloadShape(_ obj: Any, prefix: String = "", depth: Int = 2) -> [String] {
+    guard depth > 0, let dict = obj as? [String: Any] else { return [] }
+    var keys: [String] = []
+    for k in dict.keys.sorted() {
+        keys.append(prefix + k)
+        keys += payloadShape(dict[k]!, prefix: prefix + k + ".", depth: depth - 1)
+    }
+    return keys
+}
+
+struct ShapeDrift: Equatable {
+    let added: [String], removed: [String]
+}
+
+// Compare a shape with the stored baseline for its endpoint key and update it.
+// nil on first sighting or no change; the diff when the endpoint changed.
+func noteShape(key: String, shape: [String], store: inout [String: [String]]) -> ShapeDrift? {
+    defer { store[key] = shape }
+    guard let old = store[key], old != shape else { return nil }
+    return ShapeDrift(added: Set(shape).subtracting(old).sorted(),
+                      removed: Set(old).subtracting(shape).sorted())
+}
+
 struct LaneAlert: Equatable {
     let svc: String, label: String, message: String
 }

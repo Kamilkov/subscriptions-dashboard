@@ -311,19 +311,21 @@ private func attempt(_ op: @Sendable () async throws -> [String: Limit])
 // Deliberately macOS-only (no web-parity counterpart): the app is the always-
 // running process, and a browser page can't notify reliably.
 private func postAlerts(_ alerts: [LaneAlert]) {
-    guard !alerts.isEmpty else { return }
+    for a in alerts {
+        postNotification(title: a.svc.uppercased(), body: a.message, id: "\(a.svc).\(a.label)")
+    }
+}
+
+func postNotification(title: String, body: String, id: String) {
     let center = UNUserNotificationCenter.current()
     // No-op after the first grant/denial; denial just means silent alerts.
     center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
         guard granted else { return }
-        for a in alerts {
-            let content = UNMutableNotificationContent()
-            content.title = a.svc.uppercased()
-            content.body = a.message
-            center.add(UNNotificationRequest(
-                identifier: "\(a.svc).\(a.label).\(Date().timeIntervalSince1970)",
-                content: content, trigger: nil))
-        }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        center.add(UNNotificationRequest(identifier: "\(id).\(Date().timeIntervalSince1970)",
+                                         content: content, trigger: nil))
     }
 }
 
