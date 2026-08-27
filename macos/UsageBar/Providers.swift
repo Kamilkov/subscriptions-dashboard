@@ -248,11 +248,17 @@ enum Providers {
 
     static func fetchCursor() async throws -> [String: Limit] {
         let (uid, tok) = try readCursorSession()
-        let data = try await postJSON("https://cursor.com/api/dashboard/get-current-period-usage",
-                                      headers: ["Cookie": "WorkosCursorSessionToken=\(uid)%3A%3A\(tok)",
-                                                "Origin": "https://cursor.com",
-                                                "User-Agent": "Mozilla/5.0"],
-                                      body: [:])
-        return try parseCursor(data)
+        let headers = ["Cookie": "WorkosCursorSessionToken=\(uid)%3A%3A\(tok)",
+                       "Origin": "https://cursor.com", "User-Agent": "Mozilla/5.0"]
+        var out = try parseCursor(await postJSON(
+            "https://cursor.com/api/dashboard/get-current-period-usage", headers: headers, body: [:]))
+        // Soft-fail: Grok Bot is an undocumented codename endpoint that may vanish
+        // or change shape; losing it must not take the monthly meters down with it.
+        if let data = try? await postJSON("https://cursor.com/api/dashboard/get-sand-usage-status",
+                                          headers: headers, body: [:]),
+           let grok = try? parseCursorGrok(data) {
+            out["weekly_grok"] = grok
+        }
+        return out
     }
 }

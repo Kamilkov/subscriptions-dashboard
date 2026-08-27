@@ -173,6 +173,21 @@ def parse_cursor(payload):
     return {"monthly_auto": meter(auto), "monthly_api": meter(api)}
 
 
+def parse_cursor_grok(payload):
+    """Grok Bot weekly meter from get-sand-usage-status ("sand" is Cursor's
+    codename for Grok Bot). Separate endpoint from the monthly meters."""
+    try:
+        pct = _num(payload["usagePercent"])
+        start = iso_to_epoch(payload["currentPeriodStart"])
+        end = iso_to_epoch(payload["nextResetTimestampUtc"])
+    except (KeyError, TypeError, ValueError, AttributeError) as e:
+        raise FetchError("parse", f"cursor grok payload: {e.__class__.__name__}")
+    if end <= start:
+        raise FetchError("parse", "cursor grok payload: bad period")
+    return {"pct": round(pct, 1), "reset_at": end, "window_seconds": end - start,
+            "blocked": pct >= 100.0 or payload.get("hasAvailableUsage") is False}
+
+
 def parse_antigravity(payload):
     """Per-group weekly + 5-hour pools from Antigravity's local language
     server (RetrieveUserQuotaSummary). Quota is metered per model *group*
@@ -449,11 +464,18 @@ def fetch_cursor(read_session=None, post=None):
     read_session = read_session or read_cursor_session
     post = post or http_post_json
     uid, tok = read_session()
-    payload = post("https://cursor.com/api/dashboard/get-current-period-usage",
-                   {"Cookie": f"WorkosCursorSessionToken={uid}%3A%3A{tok}",
-                    "Origin": "https://cursor.com", "User-Agent": "Mozilla/5.0"},
-                   body={})
-    return parse_cursor(payload)
+    headers = {"Cookie": f"WorkosCursorSessionToken={uid}%3A%3A{tok}",
+               "Origin": "https://cursor.com", "User-Agent": "Mozilla/5.0"}
+    out = parse_cursor(post("https://cursor.com/api/dashboard/get-current-period-usage",
+                            headers, body={}))
+    # Soft-fail: Grok Bot is an undocumented codename endpoint that may vanish
+    # or change shape; losing it must not take the monthly meters down with it.
+    try:
+        out["weekly_grok"] = parse_cursor_grok(
+            post("https://cursor.com/api/dashboard/get-sand-usage-status", headers, body={}))
+    except Exception as e:
+        print(f"cursor grok meter skipped: {e.__class__.__name__}: {e}", file=sys.stderr)
+    return out
 
 
 def new_service_state():
@@ -820,7 +842,8 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
 const PACE = {under: "UNDER", on: "ON PACE", over: "OVER"};
 const LABELS = {session: "5-hour session", weekly_scoped: "Weekly - Opus and above", rolling: "Rolling",
                 monthly: "Monthly - included usage",
-                monthly_auto: "Monthly - Cursor models", monthly_api: "Monthly - other models"};
+                monthly_auto: "Monthly - Cursor models", monthly_api: "Monthly - other models",
+                weekly_grok: "Weekly - Grok Bot"};
 const GROUPS = [["rolling", "Rolling", "5-hour window"],
                 ["weekly", "Weekly", "7-day windows"],
                 ["monthly", "Monthly", "billing cycle"]];
@@ -1191,7 +1214,8 @@ actually use. Short bars week after week mean headroom you're not touching.</p>
   apply();
 })();
 const NAMES = {weekly_all:"Weekly - all models", monthly_auto:"Monthly - Cursor models",
-               monthly_api:"Monthly - other models", monthly:"Monthly - included usage"};
+               monthly_api:"Monthly - other models", monthly:"Monthly - included usage",
+               weekly_grok:"Weekly - Grok Bot"};
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function shortDate(ep){return new Date(ep*1000).toLocaleDateString(undefined,{day:"numeric",month:"short"});}
 function card(l, now){
@@ -1362,7 +1386,8 @@ def limit_paths(service, data):
         return [(k, [k]) for k in ("session", "weekly_all", "weekly_scoped") if k in data]
     if service == "cursor":
         # "monthly" kept so stale pre-2026-08 snapshots still render
-        return [(k, [k]) for k in ("monthly_auto", "monthly_api", "monthly") if k in data]
+        return [(k, [k]) for k in ("weekly_grok", "monthly_auto", "monthly_api", "monthly")
+                if k in data]
     if service in ("antigravity", "copilot"):
         return [(k, [k]) for k in sorted(data)]  # one lane per pool / quota
     paths = [("rolling", ["rolling"])] if "rolling" in data else []

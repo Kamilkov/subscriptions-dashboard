@@ -131,6 +131,17 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(out.count, 2)
     }
 
+    func testParseCursorGrok() throws {
+        let out = try parseCursorGrok(fixture("cursor_sand_usage"))
+        XCTAssertEqual(out.pct, 2.7)
+        XCTAssertEqual(out.resetEpoch, 1788374501, accuracy: 1)
+        XCTAssertEqual(out.windowSeconds, 604800, accuracy: 1)
+        XCTAssertFalse(out.blocked)
+        let exhausted = #"{"usagePercent": 12, "currentPeriodStart": "2026-08-26T18:41:41.111Z", "nextResetTimestampUtc": "2026-09-02T18:41:41.111Z", "hasAvailableUsage": false}"#
+        XCTAssertTrue(try parseCursorGrok(Data(exhausted.utf8)).blocked)
+        XCTAssertThrowsError(try parseCursorGrok(Data("{}".utf8)))
+    }
+
     func testParseCursorBadCycle() {
         let payload = #"{"billingCycleStart": "2000", "billingCycleEnd": "1000", "planUsage": {"autoPercentUsed": 1, "apiPercentUsed": 2}}"#
         XCTAssertThrowsError(try parseCursor(Data(payload.utf8)))

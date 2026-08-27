@@ -260,6 +260,22 @@ func parseCursor(_ data: Data) throws -> [String: Limit] {
     return ["monthly_auto": meter(auto), "monthly_api": meter(api)]
 }
 
+// Grok Bot weekly meter from get-sand-usage-status ("sand" is Cursor's
+// codename for Grok Bot). Port of dashboard.py parse_cursor_grok.
+func parseCursorGrok(_ data: Data) throws -> Limit {
+    let payload = try jsonObject(data)
+    guard let pct = num(payload["usagePercent"]),
+          let startISO = payload["currentPeriodStart"] as? String,
+          let endISO = payload["nextResetTimestampUtc"] as? String,
+          let start = isoToEpoch(startISO), let end = isoToEpoch(endISO) else {
+        throw FetchError.parse("cursor grok payload: missing fields")
+    }
+    guard end > start else { throw FetchError.parse("cursor grok payload: bad period") }
+    let available = payload["hasAvailableUsage"] as? Bool ?? true
+    return Limit(pct: (pct * 10).rounded() / 10, resetEpoch: end, windowSeconds: end - start,
+                 blocked: pct >= 100.0 || !available)
+}
+
 // MARK: - Copilot
 
 let monthSeconds: Double = 30 * 86400
@@ -451,6 +467,7 @@ let laneNames: [String: String] = [
     "weekly": "Weekly",
     "monthly_auto": "Monthly - Cursor models",
     "monthly_api": "Monthly - other models",
+    "weekly_grok": "Weekly - Grok Bot",
 ]
 
 func laneName(_ label: String) -> String {

@@ -213,6 +213,22 @@ class TestParsers(unittest.TestCase):
         self.assertTrue(out["monthly_api"]["blocked"])
         self.assertFalse(out["monthly_auto"]["blocked"])
 
+    def test_parse_cursor_grok(self):
+        import dashboard
+        out = dashboard.parse_cursor_grok(load_fixture("cursor_sand_usage.json"))
+        self.assertEqual(out, {"pct": 2.7, "reset_at": 1788374501.111,
+                               "window_seconds": 604800.0, "blocked": False})
+        p = load_fixture("cursor_sand_usage.json")
+        p["hasAvailableUsage"] = False
+        self.assertTrue(dashboard.parse_cursor_grok(p)["blocked"])
+        for bad in ({}, {"usagePercent": "x", "currentPeriodStart": "2026-01-01T00:00:00Z",
+                         "nextResetTimestampUtc": "2026-01-08T00:00:00Z"},
+                    {"usagePercent": 1, "currentPeriodStart": "2026-01-08T00:00:00Z",
+                     "nextResetTimestampUtc": "2026-01-01T00:00:00Z"}):
+            with self.assertRaises(dashboard.FetchError) as cm:
+                dashboard.parse_cursor_grok(bad)
+            self.assertEqual(cm.exception.category, "parse")
+
     def test_parse_cursor_bad_cycle_or_garbage_raises(self):
         import dashboard
         p = load_fixture("cursor_usage.json")
@@ -344,6 +360,9 @@ class TestProjection(unittest.TestCase):
         udata = dashboard.parse_cursor(load_fixture("cursor_usage.json"))
         self.assertEqual(dashboard.limit_paths("cursor", udata),
                          [("monthly_auto", ["monthly_auto"]), ("monthly_api", ["monthly_api"])])
+        udata["weekly_grok"] = dashboard.parse_cursor_grok(load_fixture("cursor_sand_usage.json"))
+        self.assertEqual([k for k, _ in dashboard.limit_paths("cursor", udata)],
+                         ["weekly_grok", "monthly_auto", "monthly_api"])
         # stale pre-2026-08 snapshot still renders its single lane
         self.assertEqual(dashboard.limit_paths("cursor", {"monthly": {}}),
                          [("monthly", ["monthly"])])
@@ -709,16 +728,32 @@ class TestCredentialsAndFetch(unittest.TestCase):
         seen = {}
 
         def fake_post(url, headers, body, opener=None):
-            seen["url"], seen["headers"], seen["body"] = url, headers, body
+            seen.setdefault("urls", []).append(url)
+            seen["headers"], seen["body"] = headers, body
+            if url.endswith("get-sand-usage-status"):
+                return load_fixture("cursor_sand_usage.json")
             return load_fixture("cursor_usage.json")
 
         out = dashboard.fetch_cursor(read_session=lambda: ("user_cursor123", "tok.abc.def"),
                                      post=fake_post)
         self.assertEqual(out["monthly_auto"]["pct"], 7.4)
-        self.assertEqual(seen["url"], "https://cursor.com/api/dashboard/get-current-period-usage")
+        self.assertEqual(out["weekly_grok"]["pct"], 2.7)
+        self.assertEqual(seen["urls"], ["https://cursor.com/api/dashboard/get-current-period-usage",
+                                        "https://cursor.com/api/dashboard/get-sand-usage-status"])
         self.assertEqual(seen["headers"]["Cookie"],
                          "WorkosCursorSessionToken=user_cursor123%3A%3Atok.abc.def")
         self.assertEqual(seen["body"], {})
+
+    def test_fetch_cursor_grok_soft_fails(self):
+        import dashboard
+
+        def fake_post(url, headers, body, opener=None):
+            if url.endswith("get-sand-usage-status"):
+                raise dashboard.FetchError("http", "HTTP 404")
+            return load_fixture("cursor_usage.json")
+
+        out = dashboard.fetch_cursor(read_session=lambda: ("u", "t.a.b"), post=fake_post)
+        self.assertEqual(sorted(out), ["monthly_api", "monthly_auto"])
 
     def test_fetch_codex_wires_creds_and_parser(self):
         import dashboard

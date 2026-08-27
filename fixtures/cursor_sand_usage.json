@@ -1,0 +1,10 @@
+{
+  "currentPeriodStart": "2026-08-26T18:41:41.111Z",
+  "nextResetTimestampUtc": "2026-09-02T18:41:41.111Z",
+  "usagePercent": 2.743654,
+  "hasAvailableUsage": true,
+  "hasNonZeroIncludedLimit": true,
+  "upgradeRecommendation": {"kind": "upgrade-to-pro-plus-for-more-usage"},
+  "onDemandSettings": {"visible": true, "eligible": true},
+  "grokPlanLabel": "Grok Bot Plan"
+}
