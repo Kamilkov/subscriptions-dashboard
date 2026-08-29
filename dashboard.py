@@ -790,7 +790,8 @@ body.grid-midnight .win.weekly::after { content:none; }
 
 /* Family layout: one row per model family, its 5-hour and weekly windows side
    by side on two shared axes (label | 5-hour | weekly | meta × 2). */
-.axisrow.fam, .lane.fam { grid-template-columns:150px var(--roll, 4fr) var(--week, 6fr) 270px; }
+/* label | 5-hour bar | 5-hour numbers | weekly bar | weekly numbers */
+.axisrow.fam, .lane.fam { grid-template-columns:150px var(--roll, 4fr) 80px var(--week, 6fr) 190px; }
 .axisrow.fam { margin-top:14px; }
 /* Draggable divider between the two family axes (sets --roll/--week). */
 .axis .split { position:absolute; top:-15px; bottom:-4px; left:calc(100% + 5px); width:6px;
@@ -801,9 +802,7 @@ body.grid-midnight .win.weekly::after { content:none; }
              text-transform:uppercase; color:var(--ink); }
 .area .empty { position:absolute; top:6px; left:0; font:10px/1 var(--mono); color:var(--faint); }
 .lane.brk { border-top:1px solid var(--line); margin-top:4px; padding-top:12px; }
-.meta2 { display:grid; grid-template-columns:80px 1fr; gap:0 12px; }
-.meta2 .meta.m5 { text-align:left; }
-.meta2 .cd { display:block; margin-top:3px; }
+.lane.fam .meta .cd { display:block; margin-top:3px; }
 
 .meta { text-align:right; font-variant-numeric:tabular-nums; }
 .meta .pct { font:650 15px/1 var(--mono); letter-spacing:-.01em; color:var(--ink); }
@@ -836,7 +835,7 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
   .axisrow, .lane, .axisrow.fam, .lane.fam { grid-template-columns:1fr; gap:7px; }
   .axisrow > :first-child, .axisrow > :last-child { display:none; }
   .axisrow.fam .axis + .axis { margin-top:18px; }
-  .meta2 { display:flex; flex-wrap:wrap; gap:4px 16px; }
+  .axisrow.fam > :nth-child(3) { display:none; }
   .meta { text-align:left; display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
   .meta .rem, .meta .sub { margin-top:0; }
 }
@@ -1147,7 +1146,7 @@ function familiesGroup(limits, nowSec, sessionIdle) {
   const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span>' + nowl(m) + '</div>';
   let html = '<div class="axisrow fam"><div></div>' +
     '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') +
-      '<div class="split" title="Drag to resize · double-click to reset"></div></div>' +
+      '<div class="split" title="Drag to resize · double-click to reset"></div></div><div></div>' +
     '<div class="axis"><span class="cap">Weekly</span>' + (mw ? axisInner("weekly", mw) : '') + '</div>' +
     '<div></div></div>';
   for (let i = 0; i < rows.length; i++) {
@@ -1164,10 +1163,9 @@ function familiesGroup(limits, nowSec, sessionIdle) {
       '<div class="lab">' + (cont ? '' : '<span class="svc">' + esc(r.svc) + '</span>') +
         '<span class="nm">' + esc(r.fam) + '</span>' + tag + chip + '</div>' +
       (r.rolling ? areaHtml(r.rolling, "") : empty(mr, idle ? "no active session" : "no 5-hour limit")) +
+      famMeta(r.rolling, "m5", e => new Date(e * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"})) +
       (r.weekly ? areaHtml(r.weekly, days) : empty(mw, "no weekly limit")) +
-      '<div class="meta2">' +
-        famMeta(r.rolling, "m5", e => new Date(e * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"})) +
-        famMeta(r.weekly, "mw", fmtReset) + '</div></div>';
+      famMeta(r.weekly, "mw", fmtReset) + '</div>';
   }
   return '<div class="group"><div class="group-h"><span class="t">Model families</span>' +
     '<span class="hint">5-hour and weekly windows side by side</span></div>' + html + '</div>';
@@ -1198,7 +1196,7 @@ document.getElementById("board").addEventListener("pointerdown", e => {
   if (!h) return;
   const cells = h.closest(".axisrow").querySelectorAll(".axis");
   const left = cells[0].getBoundingClientRect().left, right = cells[1].getBoundingClientRect().right;
-  const usable = right - left - 16;  // minus the grid gap
+  const usable = right - left - 32 - 80;  // minus two grid gaps and the 5-hour numbers column
   const move = ev => applyRollFrac((ev.clientX - left - 8) / usable);
   h.setPointerCapture(e.pointerId);
   h.addEventListener("pointermove", move);

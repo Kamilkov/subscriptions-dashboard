@@ -325,21 +325,25 @@ struct BoardView: View {
     // widen with the window; the split (store.rollFrac) is user-draggable.
     private var rollFrac: CGFloat { store.rollFrac }
 
-    // Rolling | weekly cells split by rollFrac, gap included in the maths.
-    private func splitCells<A: View, B: View>(height: CGFloat, _ a: A, _ b: B) -> some View {
+    // Rolling bar | 5-hour numbers (fixed) | weekly bar: the two bars split
+    // the remaining width by rollFrac, gaps included in the maths.
+    private let famMidWidth: CGFloat = 70
+    private func splitUsable(_ w: CGFloat) -> CGFloat { w - 2 * s(12) - s(famMidWidth) }
+    private func splitCells<A: View, M: View, B: View>(height: CGFloat, _ a: A, _ m: M, _ b: B) -> some View {
         GeometryReader { geo in
             HStack(alignment: .bottom, spacing: s(12)) {
-                a.frame(width: (geo.size.width - s(12)) * rollFrac)
+                a.frame(width: splitUsable(geo.size.width) * rollFrac)
+                m.frame(width: s(famMidWidth), alignment: .trailing)
                 b
             }
         }
         .frame(height: height)
     }
 
-    // Drag handle in the gap between the two axes; double-click resets.
+    // Drag handle in the gap after the 5-hour axis; double-click resets.
     private func splitHandle(height: CGFloat) -> some View {
         GeometryReader { geo in
-            let usable = geo.size.width - s(12)
+            let usable = splitUsable(geo.size.width)
             Rectangle().fill(.secondary.opacity(0.5))
                 .frame(width: 1, height: height)
                 .frame(width: s(10))  // hit area
@@ -356,7 +360,7 @@ struct BoardView: View {
         }
         .frame(height: height)
     }
-    private let famMetaWidth: CGFloat = 240  // 5-hour stack (70) + gap + weekly stack (160)
+    private let famMetaWidth: CGFloat = 160  // weekly numbers; the 5-hour ones sit by their bar
 
     private func familyRows(now: Double) -> (rows: [FamilyRow], roll: Axis?, week: Axis?) {
         var roll = store.enabledBuckets.contains("rolling") ? laneItems(bucket: .rolling, now: now, sorted: false) : []
@@ -394,6 +398,7 @@ struct BoardView: View {
                     Color.clear.frame(width: s(labelWidth), height: 1)
                     splitCells(height: s(32),
                                familyAxis("5-HOUR", .rolling, f.roll, now: now),
+                               Color.clear,
                                familyAxis("WEEKLY", .weekly, f.week, now: now))
                         .overlay(splitHandle(height: s(32)))
                     Color.clear.frame(width: s(famMetaWidth), height: 1)
@@ -448,15 +453,13 @@ struct BoardView: View {
                     if let it = r.rolling { LaneArea(item: it, scale: eff) }
                     else { emptyCell(roll, idle ? "no active session" : "no 5-hour limit") }
                 },
+                familyMeta(r.rolling, short: true),
                 Group {
                     if let it = r.weekly { LaneArea(item: it, scale: eff) }
                     else { emptyCell(week, "no weekly limit") }
                 })
-            HStack(alignment: .top, spacing: s(10)) {
-                familyMeta(r.rolling, short: true).frame(width: s(70), alignment: .trailing)
-                familyMeta(r.weekly, short: false).frame(width: s(160), alignment: .trailing)
-            }
-            .frame(width: s(famMetaWidth), alignment: .trailing)  // weekly-only rows stay flush right
+            familyMeta(r.weekly, short: false)
+                .frame(width: s(famMetaWidth), alignment: .trailing)
         }
         .padding(.top, cont ? -s(4) : 0)
     }
