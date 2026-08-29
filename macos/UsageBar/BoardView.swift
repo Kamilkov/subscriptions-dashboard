@@ -294,13 +294,25 @@ struct BoardView: View {
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                     }
-                    VStack(spacing: 1) {
-                        // Rolling is hours-scale, so the marker carries the clock time.
-                        Text(bucket == .monthly ? "today"
+                    // Rolling is hours-scale, so the marker carries the clock time.
+                    let mark = bucket == .monthly ? "today"
                              : bucket == .rolling
                              ? Date(timeIntervalSince1970: now).formatted(.dateTime.hour().minute())
-                             : "now")
-                            .font(.system(size: s(9), weight: .semibold, design: .monospaced))
+                             : "now"
+                    // Drop the marker text (keep the triangle) when it would run
+                    // into a visible edge label — happens in the narrow family
+                    // 5-hour column. Widths estimated at ~0.6em per mono glyph.
+                    let ch = s(5.5), w = geo.size.width, x = w * axis.nowFrac
+                    let half = CGFloat(mark.count) * ch / 2
+                    let leftW = axis.nowFrac > 0.16 && bucket != .weekly
+                        ? CGFloat(edgeLabel(bucket, axis.start, now: now).count) * ch : 0
+                    let rightW = axis.nowFrac < 0.84 && bucket != .weekly
+                        ? CGFloat(edgeLabel(bucket, axis.end, now: now).count) * ch : 0
+                    let collides = x - half < leftW + s(4) || x + half > w - rightW - s(4)
+                    VStack(spacing: 1) {
+                        if !collides {
+                            Text(mark).font(.system(size: s(9), weight: .semibold, design: .monospaced))
+                        }
                         Image(systemName: "arrowtriangle.down.fill")
                             .font(.system(size: s(5)))
                     }
@@ -454,12 +466,12 @@ struct BoardView: View {
             splitCells(height: s(18),
                 Group {
                     if let it = r.rolling { LaneArea(item: it, scale: eff) }
-                    else { emptyCell(roll, idle ? "no active session" : "no 5-hour limit") }
+                    else { emptyCell(idle ? "no active session" : "no 5-hour limit") }
                 },
                 familyMeta(r.rolling, short: true),
                 Group {
                     if let it = r.weekly { LaneArea(item: it, scale: eff) }
-                    else { emptyCell(week, "no weekly limit") }
+                    else { emptyCell("no weekly limit") }
                 })
             familyMeta(r.weekly, short: false)
                 .frame(width: s(famMetaWidth), alignment: .trailing)
@@ -467,17 +479,11 @@ struct BoardView: View {
         .padding(.top, cont ? -s(4) : 0)
     }
 
-    private func emptyCell(_ axis: Axis?, _ text: String) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Text(text).font(.system(size: s(8), design: .monospaced)).foregroundStyle(.tertiary)
-                if let axis {
-                    Rectangle().fill(.primary).frame(width: s(2))
-                        .offset(x: geo.size.width * axis.nowFrac - s(1))
-                }
-            }
-        }
-        .frame(height: s(18))
+    // No now-line: there is no window for it to mark.
+    private func emptyCell(_ text: String) -> some View {
+        Text(text).font(.system(size: s(8), design: .monospaced)).foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: s(18))
     }
 
     @ViewBuilder

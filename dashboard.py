@@ -741,6 +741,7 @@ h1 .dim { color:var(--muted); font-weight:400; }
              color:var(--muted); transform:translateX(-50%); white-space:nowrap; }
 .axis .today { position:absolute; top:0; font:600 10px/1 var(--mono); color:var(--ink);
                transform:translateX(-50%); white-space:nowrap; }
+.axis .today.notime { color:transparent; }  /* text hidden, ::after triangle stays (var(--ink)) */
 .axis .today::after { content:""; position:absolute; left:50%; bottom:-7px; transform:translateX(-50%);
                       border:3px solid transparent; border-top-color:var(--ink); }
 
@@ -1060,6 +1061,23 @@ function dayLabels(m) {
   return out;
 }
 // Local-midnight gridlines on the group's shared axis (grid=midnight mode).
+// Drop an axis marker's text (the triangle stays) when it would run into a
+// tick or day label — happens in the narrow family 5-hour column. Measured
+// after layout, so it re-runs on render, divider drag and window resize.
+function hideCollidingMarks() {
+  for (const ax of document.querySelectorAll(".axis")) {
+    const t = ax.querySelector(".today");
+    if (!t) continue;
+    t.classList.remove("notime");
+    const r = t.getBoundingClientRect();
+    const hit = [...ax.querySelectorAll(".tick, .day")].some(el => {
+      const b = el.getBoundingClientRect();
+      return b.left < r.right + 4 && b.right > r.left - 4;
+    });
+    if (hit) t.classList.add("notime");
+  }
+}
+addEventListener("resize", hideCollidingMarks);
 function midnightLines(m) {
   let out = "";
   const span = (m.end - m.start) || 1, d = new Date(m.start * 1000);
@@ -1143,8 +1161,8 @@ function familiesGroup(limits, nowSec, sessionIdle) {
     if (!byKey[key]) rows.push(byKey[key] = {svc: it.svc, fam: familyOf(it.label, it.name)});
     byKey[key][b] = it;
   }
-  const nowl = m => m ? '<div class="nowl" style="left:' + m.nowPct.toFixed(1) + '%" aria-hidden="true"></div>' : '';
-  const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span>' + nowl(m) + '</div>';
+  // No now-line in an empty cell: there is no window for it to mark.
+  const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span></div>';
   let html = '<div class="axisrow fam"><div></div>' +
     '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') +
       '</div><div class="axis mid"><div class="split" title="Drag to resize · double-click to reset"></div></div>' +
@@ -1190,6 +1208,7 @@ function applyRollFrac(f) {
   localStorage.setItem("rollFrac", f);
   document.body.style.setProperty("--roll", f + "fr");
   document.body.style.setProperty("--week", (1 - f) + "fr");
+  hideCollidingMarks();
 }
 applyRollFrac(parseFloat(localStorage.getItem("rollFrac")) || 0.4);
 document.getElementById("board").addEventListener("pointerdown", e => {
@@ -1279,6 +1298,7 @@ function render(data) {
   }
   html += bottom;
   document.getElementById("board").innerHTML = html || '<p class="unavail">No data yet.</p>';
+  hideCollidingMarks();
   document.getElementById("footer").textContent =
     "page refreshed " + new Date().toLocaleTimeString() + " (auto every 5 min)";
 }
