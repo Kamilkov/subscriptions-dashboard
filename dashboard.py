@@ -794,6 +794,7 @@ body.grid-midnight .win.weekly::after { content:none; }
 .axisrow.fam, .lane.fam { grid-template-columns:150px var(--roll, 4fr) 80px var(--week, 6fr) 190px; }
 .axisrow.fam { margin-top:14px; }
 /* Draggable divider between the two family axes (sets --roll/--week). */
+.axis.mid { border:none; }
 .axis .split { position:absolute; top:-15px; bottom:-4px; left:calc(100% + 5px); width:6px;
                cursor:col-resize; z-index:4; }
 .axis .split::after { content:""; position:absolute; left:2px; top:0; bottom:0; width:1px;
@@ -1146,7 +1147,7 @@ function familiesGroup(limits, nowSec, sessionIdle) {
   const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span>' + nowl(m) + '</div>';
   let html = '<div class="axisrow fam"><div></div>' +
     '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') +
-      '<div class="split" title="Drag to resize · double-click to reset"></div></div><div></div>' +
+      '</div><div class="axis mid"><div class="split" title="Drag to resize · double-click to reset"></div></div>' +
     '<div class="axis"><span class="cap">Weekly</span>' + (mw ? axisInner("weekly", mw) : '') + '</div>' +
     '<div></div></div>';
   for (let i = 0; i < rows.length; i++) {
@@ -1195,9 +1196,10 @@ document.getElementById("board").addEventListener("pointerdown", e => {
   const h = e.target.closest(".split");
   if (!h) return;
   const cells = h.closest(".axisrow").querySelectorAll(".axis");
-  const left = cells[0].getBoundingClientRect().left, right = cells[1].getBoundingClientRect().right;
+  const left = cells[0].getBoundingClientRect().left, right = cells[2].getBoundingClientRect().right;
   const usable = right - left - 32 - 80;  // minus two grid gaps and the 5-hour numbers column
-  const move = ev => applyRollFrac((ev.clientX - left - 8) / usable);
+  // Handle sits after the numbers column: subtract gap + column + half-gap.
+  const move = ev => applyRollFrac((ev.clientX - left - 16 - 80 - 8) / usable);
   h.setPointerCapture(e.pointerId);
   h.addEventListener("pointermove", move);
   h.addEventListener("pointerup", () => h.removeEventListener("pointermove", move), {once: true});

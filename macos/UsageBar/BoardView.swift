@@ -348,7 +348,8 @@ struct BoardView: View {
                 .frame(width: 1, height: height)
                 .frame(width: s(10))  // hit area
                 .contentShape(Rectangle())
-                .position(x: usable * rollFrac + s(6), y: height / 2)
+                // After the 5-hour numbers column, so they read as right-aligned to it.
+                .position(x: usable * rollFrac + s(12) + s(famMidWidth) + s(6), y: height / 2)
                 .onHover { inside in inside ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
                 .gesture(DragGesture(minimumDistance: 1)
                     .onChanged { g in
