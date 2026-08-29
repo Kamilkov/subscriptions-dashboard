@@ -101,6 +101,7 @@ struct BoardView: View {
     var isWindow = false
     @Environment(\.openWindow) private var openWindow
     @Environment(\.openSettings) private var openSettings
+    @State private var dragStartFrac: CGFloat? = nil  // family split drag origin
 
     // Wide enough for "Monthly - Cursor models" + UNDER tag on one line.
     private let labelWidth: CGFloat = 195
@@ -321,9 +322,8 @@ struct BoardView: View {
         var id: String { "\(svc).\(fam)" }
     }
     // The two bar columns share the space between label and meta, so both
-    // widen with the window. 0.625 = the 5-hour column at 25% more than the
-    // half it started at (150 of 299 px in the popover).
-    private let rollFrac: CGFloat = 0.625
+    // widen with the window; the split (store.rollFrac) is user-draggable.
+    private var rollFrac: CGFloat { store.rollFrac }
 
     // Rolling | weekly cells split by rollFrac, gap included in the maths.
     private func splitCells<A: View, B: View>(height: CGFloat, _ a: A, _ b: B) -> some View {
@@ -332,6 +332,27 @@ struct BoardView: View {
                 a.frame(width: (geo.size.width - s(12)) * rollFrac)
                 b
             }
+        }
+        .frame(height: height)
+    }
+
+    // Drag handle in the gap between the two axes; double-click resets.
+    private func splitHandle(height: CGFloat) -> some View {
+        GeometryReader { geo in
+            let usable = geo.size.width - s(12)
+            Rectangle().fill(.secondary.opacity(0.5))
+                .frame(width: 1, height: height)
+                .frame(width: s(10))  // hit area
+                .contentShape(Rectangle())
+                .position(x: usable * rollFrac + s(6), y: height / 2)
+                .onHover { inside in inside ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                .gesture(DragGesture(minimumDistance: 1)
+                    .onChanged { g in
+                        if dragStartFrac == nil { dragStartFrac = rollFrac }
+                        store.setRollFrac((dragStartFrac! * usable + g.translation.width) / usable)
+                    }
+                    .onEnded { _ in dragStartFrac = nil })
+                .onTapGesture(count: 2) { store.setRollFrac(Store.defaultRollFrac) }
         }
         .frame(height: height)
     }
@@ -374,6 +395,7 @@ struct BoardView: View {
                     splitCells(height: s(32),
                                familyAxis("5-HOUR", .rolling, f.roll, now: now),
                                familyAxis("WEEKLY", .weekly, f.week, now: now))
+                        .overlay(splitHandle(height: s(32)))
                     Color.clear.frame(width: s(famMetaWidth), height: 1)
                 }
                 ForEach(Array(f.rows.enumerated()), id: \.element.id) { i, r in

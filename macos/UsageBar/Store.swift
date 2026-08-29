@@ -144,6 +144,19 @@ final class Store {
         setLayoutMode(layoutMode == "families" ? "pace" : "families")
     }
 
+    // Family layout: share of the bar area given to the 5-hour column; the
+    // user drags the divider between the two axis captions (web parity: --roll).
+    static let defaultRollFrac = 0.4
+    var rollFrac: Double = {
+        let v = UserDefaults.standard.double(forKey: "rollFrac")
+        return v > 0 ? v : Store.defaultRollFrac
+    }()
+
+    func setRollFrac(_ f: Double) {
+        rollFrac = min(0.7, max(0.2, f))
+        UserDefaults.standard.set(rollFrac, forKey: "rollFrac")
+    }
+
     init(startPolling: Bool = true) {
         history = HistoryFile.load()
         seedFromHistory()

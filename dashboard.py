@@ -790,8 +790,13 @@ body.grid-midnight .win.weekly::after { content:none; }
 
 /* Family layout: one row per model family, its 5-hour and weekly windows side
    by side on two shared axes (label | 5-hour | weekly | meta × 2). */
-.axisrow.fam, .lane.fam { grid-template-columns:150px 200px 1fr 270px; }
+.axisrow.fam, .lane.fam { grid-template-columns:150px var(--roll, 4fr) var(--week, 6fr) 270px; }
 .axisrow.fam { margin-top:14px; }
+/* Draggable divider between the two family axes (sets --roll/--week). */
+.axis .split { position:absolute; top:-15px; bottom:-4px; left:calc(100% + 5px); width:6px;
+               cursor:col-resize; z-index:4; }
+.axis .split::after { content:""; position:absolute; left:2px; top:0; bottom:0; width:1px;
+                      background:var(--faint); }
 .axis .cap { position:absolute; top:-15px; left:0; font:600 10px/1 var(--mono); letter-spacing:.12em;
              text-transform:uppercase; color:var(--ink); }
 .area .empty { position:absolute; top:6px; left:0; font:10px/1 var(--mono); color:var(--faint); }
@@ -1141,7 +1146,8 @@ function familiesGroup(limits, nowSec, sessionIdle) {
   const nowl = m => m ? '<div class="nowl" style="left:' + m.nowPct.toFixed(1) + '%" aria-hidden="true"></div>' : '';
   const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span>' + nowl(m) + '</div>';
   let html = '<div class="axisrow fam"><div></div>' +
-    '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') + '</div>' +
+    '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') +
+      '<div class="split" title="Drag to resize · double-click to reset"></div></div>' +
     '<div class="axis"><span class="cap">Weekly</span>' + (mw ? axisInner("weekly", mw) : '') + '</div>' +
     '<div></div></div>';
   for (let i = 0; i < rows.length; i++) {
@@ -1178,6 +1184,30 @@ function applyGridMode() {
   document.getElementById("layouttoggle").textContent =
     layoutMode === "families" ? "layout: by family" : "layout: by pace";
 }
+// Family layout: share of the bar area given to the 5-hour column, dragged
+// via the divider between the axes (same key/range/default as the macOS app).
+function applyRollFrac(f) {
+  f = Math.min(0.7, Math.max(0.2, f));
+  localStorage.setItem("rollFrac", f);
+  document.body.style.setProperty("--roll", f + "fr");
+  document.body.style.setProperty("--week", (1 - f) + "fr");
+}
+applyRollFrac(parseFloat(localStorage.getItem("rollFrac")) || 0.4);
+document.getElementById("board").addEventListener("pointerdown", e => {
+  const h = e.target.closest(".split");
+  if (!h) return;
+  const cells = h.closest(".axisrow").querySelectorAll(".axis");
+  const left = cells[0].getBoundingClientRect().left, right = cells[1].getBoundingClientRect().right;
+  const usable = right - left - 16;  // minus the grid gap
+  const move = ev => applyRollFrac((ev.clientX - left - 8) / usable);
+  h.setPointerCapture(e.pointerId);
+  h.addEventListener("pointermove", move);
+  h.addEventListener("pointerup", () => h.removeEventListener("pointermove", move), {once: true});
+  e.preventDefault();
+});
+document.getElementById("board").addEventListener("dblclick", e => {
+  if (e.target.closest(".split")) applyRollFrac(0.4);
+});
 document.getElementById("layouttoggle").addEventListener("click", () => {
   layoutMode = layoutMode === "families" ? "pace" : "families";
   localStorage.setItem("layoutMode", layoutMode);
