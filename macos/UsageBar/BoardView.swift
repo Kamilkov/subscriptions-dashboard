@@ -141,7 +141,7 @@ struct BoardView: View {
             footer
         }
         .padding(s(14))
-        .frame(width: isWindow ? nil : 798 * eff)
+        .frame(width: isWindow ? nil : 998 * eff)
     }
 
     private var header: some View {
@@ -456,7 +456,7 @@ struct BoardView: View {
                 familyMeta(r.rolling, short: true).frame(width: s(70), alignment: .trailing)
                 familyMeta(r.weekly, short: false).frame(width: s(160), alignment: .trailing)
             }
-            .frame(width: s(famMetaWidth))
+            .frame(width: s(famMetaWidth), alignment: .trailing)  // weekly-only rows stay flush right
         }
         .padding(.top, cont ? -s(4) : 0)
     }
