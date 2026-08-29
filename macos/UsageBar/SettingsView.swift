@@ -30,9 +30,9 @@ struct SettingsView: View {
         TabView {
             generalTab.frame(height: 400)
                 .tabItem { Label("General", systemImage: "gearshape") }
-            providersTab.frame(height: 420)
+            providersTab.frame(height: 580)
                 .tabItem { Label("Providers", systemImage: "point.3.connected.trianglepath.dotted") }
-            numbersTab.frame(height: 545)
+            numbersTab.frame(height: 610)
                 .tabItem { Label("Numbers", systemImage: "info.circle") }
             updatesTab.frame(height: 110)
                 .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
