@@ -320,7 +320,21 @@ struct BoardView: View {
         var rolling: LaneItem?, weekly: LaneItem?
         var id: String { "\(svc).\(fam)" }
     }
-    private let rollWidth: CGFloat = 150
+    // The two bar columns share the space between label and meta, so both
+    // widen with the window. 0.625 = the 5-hour column at 25% more than the
+    // half it started at (150 of 299 px in the popover).
+    private let rollFrac: CGFloat = 0.625
+
+    // Rolling | weekly cells split by rollFrac, gap included in the maths.
+    private func splitCells<A: View, B: View>(height: CGFloat, _ a: A, _ b: B) -> some View {
+        GeometryReader { geo in
+            HStack(alignment: .bottom, spacing: s(12)) {
+                a.frame(width: (geo.size.width - s(12)) * rollFrac)
+                b
+            }
+        }
+        .frame(height: height)
+    }
     private let famMetaWidth: CGFloat = 240  // 5-hour stack (70) + gap + weekly stack (160)
 
     private func familyRows(now: Double) -> (rows: [FamilyRow], roll: Axis?, week: Axis?) {
@@ -357,8 +371,9 @@ struct BoardView: View {
                 }
                 HStack(alignment: .bottom, spacing: s(12)) {
                     Color.clear.frame(width: s(labelWidth), height: 1)
-                    familyAxis("5-HOUR", .rolling, f.roll, now: now).frame(width: s(rollWidth))
-                    familyAxis("WEEKLY", .weekly, f.week, now: now)
+                    splitCells(height: s(32),
+                               familyAxis("5-HOUR", .rolling, f.roll, now: now),
+                               familyAxis("WEEKLY", .weekly, f.week, now: now))
                     Color.clear.frame(width: s(famMetaWidth), height: 1)
                 }
                 ForEach(Array(f.rows.enumerated()), id: \.element.id) { i, r in
@@ -406,15 +421,17 @@ struct BoardView: View {
                 }
             }
             .frame(width: s(labelWidth), alignment: .leading)
-            Group {
-                if let it = r.rolling { LaneArea(item: it, scale: eff) }
-                else { emptyCell(roll, idle ? "no active session" : "no 5-hour limit") }
-            }
-            .frame(width: s(rollWidth))
-            if let it = r.weekly { LaneArea(item: it, scale: eff) }
-            else { emptyCell(week, "no weekly limit") }
+            splitCells(height: s(18),
+                Group {
+                    if let it = r.rolling { LaneArea(item: it, scale: eff) }
+                    else { emptyCell(roll, idle ? "no active session" : "no 5-hour limit") }
+                },
+                Group {
+                    if let it = r.weekly { LaneArea(item: it, scale: eff) }
+                    else { emptyCell(week, "no weekly limit") }
+                })
             HStack(alignment: .top, spacing: s(10)) {
-                familyMeta(r.rolling, short: true).frame(width: s(70), alignment: .leading)
+                familyMeta(r.rolling, short: true).frame(width: s(70), alignment: .trailing)
                 familyMeta(r.weekly, short: false).frame(width: s(160), alignment: .trailing)
             }
             .frame(width: s(famMetaWidth))
@@ -438,7 +455,7 @@ struct BoardView: View {
     @ViewBuilder
     private func familyMeta(_ item: LaneItem?, short: Bool) -> some View {
         if let item {
-            VStack(alignment: short ? .leading : .trailing, spacing: 1) {
+            VStack(alignment: .trailing, spacing: 1) {
                 Text("\(Int(item.limit.pct.rounded()))%")
                     .font(.system(size: s(13), weight: .bold, design: .monospaced))
                     .foregroundStyle(item.pace.color)
