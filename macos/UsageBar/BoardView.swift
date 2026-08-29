@@ -495,6 +495,10 @@ struct BoardView: View {
                     Text(v).font(.system(size: s(9), design: .monospaced)).foregroundStyle(.tertiary)
                 }
             }
+        } else {
+            // Keep the column: an EmptyView would drop out of the HStack and
+            // let the weekly bar grow into the numbers column.
+            Color.clear
         }
     }
 
