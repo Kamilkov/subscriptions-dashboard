@@ -331,9 +331,11 @@ struct BoardView: View {
     private func splitUsable(_ w: CGFloat) -> CGFloat { w - 2 * s(12) - s(famMidWidth) }
     private func splitCells<A: View, M: View, B: View>(height: CGFloat, _ a: A, _ m: M, _ b: B) -> some View {
         GeometryReader { geo in
-            HStack(alignment: .bottom, spacing: s(12)) {
+            HStack(alignment: .center, spacing: s(12)) {
                 a.frame(width: splitUsable(geo.size.width) * rollFrac)
-                m.frame(width: s(famMidWidth), alignment: .trailing)
+                // Pinned to the row height: the 3-line numbers stack overflows
+                // symmetrically instead of pushing the bars down.
+                m.frame(width: s(famMidWidth), height: height, alignment: .trailing)
                 b
             }
         }
