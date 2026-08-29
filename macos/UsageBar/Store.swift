@@ -131,6 +131,19 @@ final class Store {
         UserDefaults.standard.set(gridMode, forKey: "gridMode")
     }
 
+    // Board layout: "pace" = time-window groups, worst pace first; "families" =
+    // one row per model family, fixed provider order (same key/values as web).
+    var layoutMode: String = UserDefaults.standard.string(forKey: "layoutMode") ?? "pace"
+
+    func setLayoutMode(_ mode: String) {
+        layoutMode = mode
+        UserDefaults.standard.set(mode, forKey: "layoutMode")
+    }
+
+    func toggleLayoutMode() {
+        setLayoutMode(layoutMode == "families" ? "pace" : "families")
+    }
+
     init(startPolling: Bool = true) {
         history = HistoryFile.load()
         seedFromHistory()

@@ -788,6 +788,18 @@ body.grid-midnight .win.weekly::after { content:none; }
 .lab .tag.blocked::before { background:var(--over); }
 .lane.blocked .win { box-shadow:inset 0 0 0 1.5px var(--over); }
 
+/* Family layout: one row per model family, its 5-hour and weekly windows side
+   by side on two shared axes (label | 5-hour | weekly | meta × 2). */
+.axisrow.fam, .lane.fam { grid-template-columns:150px 200px 1fr 270px; }
+.axisrow.fam { margin-top:14px; }
+.axis .cap { position:absolute; top:-15px; left:0; font:600 10px/1 var(--mono); letter-spacing:.12em;
+             text-transform:uppercase; color:var(--ink); }
+.area .empty { position:absolute; top:6px; left:0; font:10px/1 var(--mono); color:var(--faint); }
+.lane.brk { border-top:1px solid var(--line); margin-top:4px; padding-top:12px; }
+.meta2 { display:grid; grid-template-columns:80px 1fr; gap:0 12px; }
+.meta2 .meta.m5 { text-align:left; }
+.meta2 .cd { display:block; margin-top:3px; }
+
 .meta { text-align:right; font-variant-numeric:tabular-nums; }
 .meta .pct { font:650 15px/1 var(--mono); letter-spacing:-.01em; color:var(--ink); }
 .meta .pct.under { color:var(--under); }
@@ -816,8 +828,10 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
 @media (max-width: 420px) {
   body { padding:20px 14px; }
   header { flex-direction:column; gap:4px; }
-  .axisrow, .lane { grid-template-columns:1fr; gap:7px; }
+  .axisrow, .lane, .axisrow.fam, .lane.fam { grid-template-columns:1fr; gap:7px; }
   .axisrow > :first-child, .axisrow > :last-child { display:none; }
+  .axisrow.fam .axis + .axis { margin-top:18px; }
+  .meta2 { display:flex; flex-wrap:wrap; gap:4px 16px; }
   .meta { text-align:left; display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 10px; }
   .meta .rem, .meta .sub { margin-top:0; }
 }
@@ -832,6 +846,7 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
     <input type="color" id="bgd" title="Background — dark mode">
     <button id="bgreset" type="button" title="Reset background colours">&#8634;</button>
     <button id="gridtoggle" type="button"></button>
+    <button id="layouttoggle" type="button"></button>
     <a href="/history">weekly utilization &rarr;</a></nav>
 </header>
 <main><div id="board"><p class="unavail">Loading&hellip;</p></div></main>
@@ -850,6 +865,9 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
       warned. Remaining budget is shown when the vendor provides it.</dd>
     <dt>grid: midnights / window &divide;7</dt><dd>Two ways to slice weekly bars: gridlines at local
       midnights on the shared axis, or each bar divided into seven equal sevenths of its own window.</dd>
+    <dt>layout: by pace / by family</dt><dd>By pace: lanes grouped by window length, worst pace
+      first. By family: one row per model family with its 5-hour and weekly windows side by side,
+      in a fixed provider order &mdash; nothing moves between refreshes.</dd>
     <dt>Stale lanes</dt><dd>A lane that can't be fetched keeps its last good numbers and is marked
       stale with their age &mdash; never a guessed value.</dd>
   </dl>
@@ -989,6 +1007,11 @@ function unavailLine(svc, err) {  // service has no data at all
   return '<p class="unavail">' + esc(msg) + openBtn(svc, err) + '</p>';
 }
 function axisRow(key, m) {
+  return '<div class="axisrow"><div></div><div class="axis">' + axisInner(key, m) +
+    '</div><div></div></div>';
+}
+// Tick labels + now-marker of one shared axis (the inside of an .axis cell).
+function axisInner(key, m) {
   // Rolling is hours-scale, so the marker carries the actual clock time.
   const mark = key === "monthly" ? "today"
              : key === "rolling" ? new Date().toLocaleTimeString(undefined,
@@ -1005,9 +1028,7 @@ function axisRow(key, m) {
     inner = (m.nowPct > 16 ? '<span class="tick l">' + esc(edgeLabel(key, m.start)) + '</span>' : '') +
             (m.nowPct < 84 ? '<span class="tick r">' + esc(edgeLabel(key, m.end)) + '</span>' : '');
   }
-  return '<div class="axisrow"><div></div><div class="axis">' + inner +
-    '<span class="today" style="left:' + m.nowPct.toFixed(1) + '%">' + mark + '</span>' +
-    '</div><div></div></div>';
+  return inner + '<span class="today" style="left:' + m.nowPct.toFixed(1) + '%">' + mark + '</span>';
 }
 // One label per calendar day, centered over the day's segment on the shared axis.
 function dayLabels(m) {
@@ -1063,26 +1084,106 @@ function lane(it, days, cont) {  // cont: same provider as the lane above —
       (cont ? ' cont' : '') + '">' +
     '<div class="lab">' + (cont ? '' : '<span class="svc">' + esc(it.svc) + '</span>') +
       '<span class="nm">' + esc(it.name) + '</span>' + tag + chip + '</div>' +
-    '<div class="area">' +
-      '<div class="win' + weekly + '" style="left:' + it.left.toFixed(1) + '%;width:' + it.width.toFixed(1) + '%"' +
-        ' role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"' +
-        ' aria-label="' + esc(aria) + '">' +
-        '<div class="fill ' + pace + '" style="width:' + it.fill.toFixed(1) + '%"></div></div>' +
-      (days || '') +
-      '<div class="nowl" style="left:' + it.nowPct.toFixed(1) + '%" aria-hidden="true"></div>' +
-    '</div>' +
+    areaHtml(it, days) +
     '<div class="meta"><span class="pct ' + pace + '">' + pct + '%</span>' +
       ' <span class="cd">· ' + esc(countdown(d.reset_epoch)) + '</span>' +
       '<span class="sub">resets ' + esc(fmtReset(d.reset_epoch)) + '</span>' +
       rem + '<span class="sub">' + esc(verdict(d.projection)) + '</span></div></div>';
 }
+// The lane area: the window bar in its slice of the shared axis, plus the now-line.
+function areaHtml(it, days) {
+  const d = it.d, pct = Math.round(d.pct);
+  const weekly = bucketOf(d.window_seconds) === "weekly" ? " weekly" : "";
+  const aria = it.svc + " " + it.name + " — " + pct + "% used, " +
+               (d.blocked ? "limit reached, " : "") + d.pace + " pace, " +
+               Math.round(d.elapsed_pct) + "% of window elapsed";
+  return '<div class="area">' +
+      '<div class="win' + weekly + '" style="left:' + it.left.toFixed(1) + '%;width:' + it.width.toFixed(1) + '%"' +
+        ' role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '"' +
+        ' aria-label="' + esc(aria) + '">' +
+        '<div class="fill ' + d.pace + '" style="width:' + it.fill.toFixed(1) + '%"></div></div>' +
+      (days || '') +
+      '<div class="nowl" style="left:' + it.nowPct.toFixed(1) + '%" aria-hidden="true"></div>' +
+    '</div>';
+}
+// Family layout: one row per model family, 5-hour and weekly side by side.
+// The family is the lane name minus its window prefix; a provider's base
+// limits (Claude session/weekly, Codex rolling/weekly) are "All models".
+function familyOf(label, name) {
+  if (label === "session" || label === "weekly_all" || label === "rolling" || label === "weekly")
+    return "All models";
+  return name.replace(/^(Weekly|5-hour) - /, "");
+}
+function famMeta(it, cls, dateFmt) {
+  if (!it) return '<div class="meta ' + cls + '"></div>';
+  const d = it.d, pace = d.pace;
+  return '<div class="meta ' + cls + '"><span class="pct ' + pace + '">' + Math.round(d.pct) + '%</span>' +
+    '<span class="cd">· ' + esc(countdown(d.reset_epoch)) + '</span>' +
+    '<span class="sub">resets ' + esc(dateFmt(d.reset_epoch)) + '</span>' +
+    (cls === "m5" ? '' : '<span class="sub">' + esc(verdict(d.projection)) + '</span>') + '</div>';
+}
+function familiesGroup(limits, nowSec, sessionIdle) {
+  const roll = limits.filter(it => bucketOf(it.d.window_seconds) === "rolling");
+  const week = limits.filter(it => bucketOf(it.d.window_seconds) === "weekly");
+  if (!roll.length && !week.length && !sessionIdle) return "";
+  const mr = roll.length ? groupLayout(roll, nowSec) : null;
+  const mw = week.length ? groupLayout(week, nowSec) : null;
+  const days = gridMode === "midnight" && mw ? midnightLines(mw) : "";
+  // Fixed order — provider, then family, as the API lists them. No pace sort.
+  const rows = [], byKey = {};
+  for (const it of limits) {
+    const b = bucketOf(it.d.window_seconds);
+    if (b === "monthly") continue;
+    const key = it.svc + "\0" + familyOf(it.label, it.name);
+    if (!byKey[key]) rows.push(byKey[key] = {svc: it.svc, fam: familyOf(it.label, it.name)});
+    byKey[key][b] = it;
+  }
+  const nowl = m => m ? '<div class="nowl" style="left:' + m.nowPct.toFixed(1) + '%" aria-hidden="true"></div>' : '';
+  const empty = (m, txt) => '<div class="area"><span class="empty">' + txt + '</span>' + nowl(m) + '</div>';
+  let html = '<div class="axisrow fam"><div></div>' +
+    '<div class="axis"><span class="cap">5-hour</span>' + (mr ? axisInner("rolling", mr) : '') + '</div>' +
+    '<div class="axis"><span class="cap">Weekly</span>' + (mw ? axisInner("weekly", mw) : '') + '</div>' +
+    '<div></div></div>';
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i], wins = [r.rolling, r.weekly].filter(Boolean);
+    const cont = i > 0 && rows[i - 1].svc === r.svc;
+    const blocked = wins.some(it => it.d.blocked);
+    const worst = wins.reduce((a, b) => RANK[b.d.pace] < RANK[a.d.pace] ? b : a);
+    const stale = wins.find(it => it.stale);
+    const tag = blocked ? '<span class="tag blocked">LIMIT REACHED</span>'
+                        : '<span class="tag ' + worst.d.pace + '">' + PACE[worst.d.pace] + '</span>';
+    const chip = stale ? '<span class="chip">stale ' + esc(stale.age) + '</span>' : '';
+    const idle = r.svc === "claude" && r.fam === "All models" && sessionIdle;
+    html += '<div class="lane fam' + (cont ? ' cont' : ' brk') + (blocked ? ' blocked' : '') + (stale ? ' stale' : '') + '">' +
+      '<div class="lab">' + (cont ? '' : '<span class="svc">' + esc(r.svc) + '</span>') +
+        '<span class="nm">' + esc(r.fam) + '</span>' + tag + chip + '</div>' +
+      (r.rolling ? areaHtml(r.rolling, "") : empty(mr, idle ? "no active session" : "no 5-hour limit")) +
+      (r.weekly ? areaHtml(r.weekly, days) : empty(mw, "no weekly limit")) +
+      '<div class="meta2">' +
+        famMeta(r.rolling, "m5", e => new Date(e * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"})) +
+        famMeta(r.weekly, "mw", fmtReset) + '</div></div>';
+  }
+  return '<div class="group"><div class="group-h"><span class="t">Model families</span>' +
+    '<span class="hint">5-hour and weekly windows side by side</span></div>' + html + '</div>';
+}
 let gridMode = localStorage.getItem("gridMode") || "window";
+// "pace": time-window groups, worst pace first. "families": one row per model
+// family, fixed provider order. Same key and values as the macOS app.
+let layoutMode = localStorage.getItem("layoutMode") || "pace";
 let lastData = null;
 function applyGridMode() {
   document.body.classList.toggle("grid-midnight", gridMode === "midnight");
   document.getElementById("gridtoggle").textContent =
     gridMode === "midnight" ? "grid: midnights" : "grid: window /7";
+  document.getElementById("layouttoggle").textContent =
+    layoutMode === "families" ? "layout: by family" : "layout: by pace";
 }
+document.getElementById("layouttoggle").addEventListener("click", () => {
+  layoutMode = layoutMode === "families" ? "pace" : "families";
+  localStorage.setItem("layoutMode", layoutMode);
+  applyGridMode();
+  if (lastData) render(lastData);
+});
 document.getElementById("gridtoggle").addEventListener("click", () => {
   gridMode = gridMode === "midnight" ? "window" : "midnight";
   localStorage.setItem("gridMode", gridMode);
@@ -1113,7 +1214,7 @@ function render(data) {
     const age = stale && st.fetched_at ? ageText(data.server_time, st.fetched_at) : "";
     const derived = data.derived[svc] || {};
     for (const [label, d] of Object.entries(derived)) {
-      limits.push({svc: svc, name: d.name || LABELS[label] || label.replace(/_/g, " "),
+      limits.push({svc: svc, label: label, name: d.name || LABELS[label] || label.replace(/_/g, " "),
                    d: d, stale: stale, age: age});
     }
   }
@@ -1125,7 +1226,10 @@ function render(data) {
   // Claude reports session as percent 0 / resets_at null between sessions;
   // keep the rolling group visible with a placeholder instead of vanishing.
   const sessionIdle = data.claude && data.claude.data && !data.claude.data.session;
+  const families = layoutMode === "families";
+  if (families) html += familiesGroup(limits, nowSec, sessionIdle);
   for (const [key, title, hint] of GROUPS) {
+    if (families && key !== "monthly") continue;  // rolling + weekly live in the family group
     const items = limits.filter(it => bucketOf(it.d.window_seconds) === key);
     const idle = key === "rolling" && sessionIdle ? idleLane() : "";
     if (!items.length && !idle) continue;

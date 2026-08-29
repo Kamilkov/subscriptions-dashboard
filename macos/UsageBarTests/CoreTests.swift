@@ -320,6 +320,23 @@ final class CoreTests: XCTestCase {
         XCTAssertFalse(worseLane((.over, 400), (.over, 100)))
     }
 
+    // Family board layout: 5-hour + weekly of one family pair up under one key.
+    func testFamilyOfPairsWindowsOfOneFamily() {
+        let lim = Limit(pct: 0, resetEpoch: 0, windowSeconds: 0, blocked: false)
+        XCTAssertEqual(familyOf("session", lim), "All models")
+        XCTAssertEqual(familyOf("weekly_all", lim), "All models")
+        XCTAssertEqual(familyOf("rolling", lim), "All models")
+        XCTAssertEqual(familyOf("weekly_scoped", lim), "Opus and above")
+        XCTAssertEqual(familyOf("weekly_scoped", Limit(pct: 0, resetEpoch: 0, windowSeconds: 0,
+                                                       blocked: false, name: "Weekly - Fable")), "Fable")
+        XCTAssertEqual(familyOf("5-hour - Gemini", Limit(pct: 0, resetEpoch: 0, windowSeconds: 0,
+                                                         blocked: false, name: "5-hour - Gemini")),
+                       familyOf("Weekly - Gemini", Limit(pct: 0, resetEpoch: 0, windowSeconds: 0,
+                                                         blocked: false, name: "Weekly - Gemini")))
+        XCTAssertEqual(familyOf("model:GPT-5.3-Codex-Spark", lim), "GPT-5.3-Codex-Spark")
+        XCTAssertEqual(familyOf("weekly_grok", lim), "Grok Bot")
+    }
+
     // MARK: - finite-but-absurd values (would trap in Int() at render sites)
 
     func testAbsurdRawPercentRejected() throws {

@@ -508,6 +508,16 @@ func laneDisplay(_ label: String, _ limit: Limit) -> String {
     limit.name ?? laneName(label)
 }
 
+// Family key of a lane (family board layout): its name minus the window
+// prefix; a provider's base limits (Claude session/weekly, Codex
+// rolling/weekly) are "All models". Web parity: familyOf().
+func familyOf(_ label: String, _ limit: Limit) -> String {
+    if ["session", "weekly_all", "rolling", "weekly"].contains(label) { return "All models" }
+    let n = laneDisplay(label, limit)
+    for p in ["Weekly - ", "5-hour - "] where n.hasPrefix(p) { return String(n.dropFirst(p.count)) }
+    return n
+}
+
 // MARK: - Weekly utilization ("am I using my subscription enough?")
 
 struct UtilWindow: Sendable, Equatable { let reset: Double; let peak: Double }

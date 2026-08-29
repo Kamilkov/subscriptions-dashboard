@@ -1249,6 +1249,17 @@ class TestServerIntegration(unittest.TestCase):
 
 
 class TestHtmlPage(unittest.TestCase):
+    def test_family_layout_toggle(self):
+        import dashboard
+        page = dashboard.HTML_PAGE
+        self.assertIn('id="layouttoggle"', page)
+        self.assertIn('localStorage.getItem("layoutMode") || "pace"', page)  # same key as macOS
+        self.assertIn('function familiesGroup(', page)
+        # Family view replaces rolling + weekly; monthly still renders below it.
+        self.assertIn('if (families && key !== "monthly") continue;', page)
+        # Fixed order in the family view — the pace sort must not touch its rows.
+        self.assertNotIn('rows.sort(', page)
+
     def test_weekly_bars_have_six_subtle_day_ticks(self):
         import dashboard
         self.assertIn('.win.weekly::after', dashboard.HTML_PAGE)

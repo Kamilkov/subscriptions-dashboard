@@ -123,8 +123,11 @@ struct BoardView: View {
                     if msg.hasPrefix("Antigravity not running") { openAntigravityButton }
                 }
             }
+            let families = store.layoutMode == "families"
+            if families { familiesGroupView(now: now) }
             ForEach(Bucket.allCases, id: \.self) { bucket in
-                if store.enabledBuckets.contains(bucket.rawValue) {
+                // Family layout: rolling + weekly live in the family group.
+                if store.enabledBuckets.contains(bucket.rawValue) && (!families || bucket == .monthly) {
                     groupView(bucket, now: now)
                 }
             }
@@ -155,6 +158,10 @@ struct BoardView: View {
                     store.toggleGridMode()
                 }
                 .controlSize(.small)
+                Button(store.layoutMode == "families" ? "layout: by family" : "layout: by pace") {
+                    store.toggleLayoutMode()
+                }
+                .controlSize(.small)
             }
             Button("Refresh") { Task { await store.refresh(force: true) } }
                 .controlSize(.small)
@@ -172,6 +179,9 @@ struct BoardView: View {
                 Menu {
                     Button(store.gridMode == "midnight" ? "grid: midnights" : "grid: window /7") {
                         store.toggleGridMode()
+                    }
+                    Button(store.layoutMode == "families" ? "layout: by family" : "layout: by pace") {
+                        store.toggleLayoutMode()
                     }
                     Button("Options…") {
                         // SettingsLink goes dead after the window closes once;
@@ -245,10 +255,18 @@ struct BoardView: View {
 
     // Shared date axis: edge labels (dropped when the now-marker would collide,
     // same 16%/84% thresholds as the web board) and the now/today marker.
-    private func axisRow(_ bucket: Bucket, axis: (start: Double, end: Double, nowFrac: Double),
-                         now: Double) -> some View {
+    private func axisRow(_ bucket: Bucket, axis: Axis, now: Double) -> some View {
         HStack(alignment: .center, spacing: s(12)) {
             Color.clear.frame(width: s(labelWidth), height: 1)
+            axisCell(bucket, axis: axis, now: now)
+            Color.clear.frame(width: s(metaWidth), height: 1)
+        }
+    }
+
+    private typealias Axis = (start: Double, end: Double, nowFrac: Double)
+
+    // The axis itself (tick labels + now-marker), sized by its container.
+    private func axisCell(_ bucket: Bucket, axis: Axis, now: Double) -> some View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     if bucket == .weekly {
@@ -290,7 +308,150 @@ struct BoardView: View {
                 }
             }
             .frame(height: s(18))
-            Color.clear.frame(width: s(metaWidth), height: 1)
+    }
+
+    // MARK: - family layout (layoutMode == "families")
+
+    // One row per model family, its 5-hour and weekly windows side by side on
+    // two shared axes. Fixed order — provider, then family — no pace sort
+    // (web parity: familiesGroup()).
+    private struct FamilyRow: Identifiable {
+        let svc: String, fam: String
+        var rolling: LaneItem?, weekly: LaneItem?
+        var id: String { "\(svc).\(fam)" }
+    }
+    private let rollWidth: CGFloat = 150
+    private let famMetaWidth: CGFloat = 240  // 5-hour stack (70) + gap + weekly stack (160)
+
+    private func familyRows(now: Double) -> (rows: [FamilyRow], roll: Axis?, week: Axis?) {
+        var roll = store.enabledBuckets.contains("rolling") ? laneItems(bucket: .rolling, now: now, sorted: false) : []
+        var week = store.enabledBuckets.contains("weekly") ? laneItems(bucket: .weekly, now: now, sorted: false) : []
+        let ra: Axis? = roll.isEmpty ? nil : layout(&roll, bucket: .rolling, now: now)
+        let wa: Axis? = week.isEmpty ? nil : layout(&week, bucket: .weekly, now: now)
+        var byKey: [String: FamilyRow] = [:]
+        for it in roll + week {
+            let fam = familyOf(it.label, it.limit)
+            var row = byKey["\(it.svc).\(fam)"] ?? FamilyRow(svc: it.svc, fam: fam)
+            if Bucket(windowSeconds: it.limit.windowSeconds) == .rolling { row.rolling = it } else { row.weekly = it }
+            byKey[row.id] = row
+        }
+        let order = store.enabledServices
+        let rows = byKey.values.sorted {
+            (order.firstIndex(of: $0.svc) ?? 99, $0.fam) < (order.firstIndex(of: $1.svc) ?? 99, $1.fam)
+        }
+        return (rows, ra, wa)
+    }
+
+    @ViewBuilder
+    private func familiesGroupView(now: Double) -> some View {
+        let f = familyRows(now: now)
+        let claudeLanes = store.enabled.contains("claude") ? store.states["claude"]!.lanes : [:]
+        let sessionIdle = !claudeLanes.isEmpty && claudeLanes["session"] == nil
+        if !f.rows.isEmpty {
+            VStack(alignment: .leading, spacing: s(8)) {
+                HStack {
+                    Text("MODEL FAMILIES")
+                        .font(.system(size: s(10), weight: .semibold, design: .monospaced)).kerning(1.2)
+                    Spacer()
+                    Text("5-hour and weekly windows side by side").font(.system(size: s(10))).foregroundStyle(.secondary)
+                }
+                HStack(alignment: .bottom, spacing: s(12)) {
+                    Color.clear.frame(width: s(labelWidth), height: 1)
+                    familyAxis("5-HOUR", .rolling, f.roll, now: now).frame(width: s(rollWidth))
+                    familyAxis("WEEKLY", .weekly, f.week, now: now)
+                    Color.clear.frame(width: s(famMetaWidth), height: 1)
+                }
+                ForEach(Array(f.rows.enumerated()), id: \.element.id) { i, r in
+                    let cont = i > 0 && f.rows[i - 1].svc == r.svc
+                    if i > 0 && !cont { Divider() }
+                    familyRow(r, cont: cont, roll: f.roll, week: f.week,
+                              idle: sessionIdle && r.svc == "claude" && r.fam == "All models")
+                }
+            }
+            .padding(s(10))
+            .background(RoundedRectangle(cornerRadius: s(9)).fill(.quaternary.opacity(0.4)))
+        }
+    }
+
+    private func familyAxis(_ cap: String, _ bucket: Bucket, _ axis: Axis?, now: Double) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(cap).font(.system(size: s(9), weight: .semibold, design: .monospaced)).kerning(1)
+            if let axis { axisCell(bucket, axis: axis, now: now) } else { Color.clear.frame(height: s(18)) }
+        }
+    }
+
+    private func familyRow(_ r: FamilyRow, cont: Bool, roll: Axis?, week: Axis?, idle: Bool) -> some View {
+        let wins = [r.rolling, r.weekly].compactMap { $0 }
+        let blocked = wins.contains { $0.limit.blocked }
+        let worst = wins.min { $0.pace.rank < $1.pace.rank }!
+        let stale = wins.first { $0.stale }
+        return HStack(alignment: .center, spacing: s(12)) {
+            VStack(alignment: .leading, spacing: 1) {
+                if !cont {
+                    Text(r.svc.uppercased())
+                        .font(.system(size: s(11), weight: .bold, design: .monospaced)).kerning(0.8)
+                }
+                HStack(spacing: s(5)) {
+                    Text(r.fam).font(.system(size: s(12)))
+                    Text(blocked ? "LIMIT REACHED" : worst.pace.text)
+                        .font(.system(size: s(9), weight: .semibold, design: .monospaced))
+                        .foregroundStyle(blocked ? Pace.over.color : worst.pace.color)
+                    if let stale {
+                        Text("stale \(stale.age)")
+                            .font(.system(size: s(9), weight: .semibold, design: .monospaced))
+                            .padding(.horizontal, s(4)).padding(.vertical, 1)
+                            .background(Capsule().fill(Pace.on.color))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .frame(width: s(labelWidth), alignment: .leading)
+            Group {
+                if let it = r.rolling { LaneArea(item: it, scale: eff) }
+                else { emptyCell(roll, idle ? "no active session" : "no 5-hour limit") }
+            }
+            .frame(width: s(rollWidth))
+            if let it = r.weekly { LaneArea(item: it, scale: eff) }
+            else { emptyCell(week, "no weekly limit") }
+            HStack(alignment: .top, spacing: s(10)) {
+                familyMeta(r.rolling, short: true).frame(width: s(70), alignment: .leading)
+                familyMeta(r.weekly, short: false).frame(width: s(160), alignment: .trailing)
+            }
+            .frame(width: s(famMetaWidth))
+        }
+        .padding(.top, cont ? -s(4) : 0)
+    }
+
+    private func emptyCell(_ axis: Axis?, _ text: String) -> some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Text(text).font(.system(size: s(8), design: .monospaced)).foregroundStyle(.tertiary)
+                if let axis {
+                    Rectangle().fill(.primary).frame(width: s(2))
+                        .offset(x: geo.size.width * axis.nowFrac - s(1))
+                }
+            }
+        }
+        .frame(height: s(18))
+    }
+
+    @ViewBuilder
+    private func familyMeta(_ item: LaneItem?, short: Bool) -> some View {
+        if let item {
+            VStack(alignment: short ? .leading : .trailing, spacing: 1) {
+                Text("\(Int(item.limit.pct.rounded()))%")
+                    .font(.system(size: s(13), weight: .bold, design: .monospaced))
+                    .foregroundStyle(item.pace.color)
+                Text("· \(countdown(item.limit.resetEpoch))")
+                    .font(.system(size: s(10), design: .monospaced)).foregroundStyle(.secondary)
+                Text("resets " + (short
+                     ? Date(timeIntervalSince1970: item.limit.resetEpoch).formatted(.dateTime.hour().minute())
+                     : fmtReset(item.limit.resetEpoch)))
+                    .font(.system(size: s(9), design: .monospaced)).foregroundStyle(.secondary)
+                if !short, let v = item.verdict {
+                    Text(v).font(.system(size: s(9), design: .monospaced)).foregroundStyle(.tertiary)
+                }
+            }
         }
     }
 
@@ -331,7 +492,7 @@ struct BoardView: View {
 
     // MARK: - lane building + web groupLayout math
 
-    private func laneItems(bucket: Bucket, now: Double) -> [LaneItem] {
+    private func laneItems(bucket: Bucket, now: Double, sorted: Bool = true) -> [LaneItem] {
         var out: [LaneItem] = []
         for svc in store.enabledServices {
             let st = store.states[svc]!
@@ -351,6 +512,7 @@ struct BoardView: View {
         }
         // Merged-board spec (web parity): worst pace first, tiebreak soonest
         // reset — global order within the group, no provider clustering.
+        if !sorted { return out }
         return out.sorted {
             worseLane(($0.pace, $0.limit.resetEpoch), ($1.pace, $1.limit.resetEpoch))
         }
@@ -453,7 +615,7 @@ private struct LaneRow: View {
             }
             .frame(width: s(195), alignment: .leading)  // keep in sync with BoardView.labelWidth
 
-            area
+            LaneArea(item: item, scale: scale)
 
             VStack(alignment: .trailing, spacing: 1) {
                 HStack(spacing: s(4)) {
@@ -473,10 +635,17 @@ private struct LaneRow: View {
         }
         .padding(.top, cont ? -s(4) : 0)  // tuck continuation rows under the cluster header
     }
+}
 
-    // The lane area = the group's full time span. The window bar occupies its
-    // slice; midnight ticks and the now-line live on the area (shared axis).
-    private var area: some View {
+// The lane area = the group's full time span. The window bar occupies its
+// slice; midnight ticks and the now-line live on the area (shared axis).
+// Shared by the pace board's LaneRow and the family board's rows.
+private struct LaneArea: View {
+    let item: LaneItem
+    var scale: CGFloat = 1
+    private func s(_ x: CGFloat) -> CGFloat { x * scale }
+
+    var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             ZStack(alignment: .leading) {

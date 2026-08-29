@@ -112,6 +112,15 @@ struct SettingsView: View {
                         set: { store.setBucket(bucket, $0) }))
                 }
             }
+            Section("Board layout") {
+                Picker("Lanes", selection: Binding(
+                    get: { store.layoutMode },
+                    set: { store.setLayoutMode($0) })) {
+                    Text("By pace — worst lane first").tag("pace")
+                    Text("By model family — 5-hour and weekly side by side").tag("families")
+                }
+                .pickerStyle(.radioGroup)
+            }
             Text("Disabled providers are not polled; disabled windows are hidden. Both disappear from the board and widget.")
                 .font(.caption).foregroundStyle(.secondary)
         }
@@ -127,6 +136,7 @@ struct SettingsView: View {
         ("BLOCKED", "Shown only when the vendor reports the limit actually enforced, not merely warned. Remaining budget is shown when the vendor provides it."),
         ("Menu bar number", "Automatic picks the worst visible lane: blocked first, then over pace, then highest usage. Pin a specific lane in General."),
         ("grid: midnights / window ÷7", "Two ways to slice weekly bars: gridlines at local midnights on the shared axis, or each bar divided into seven equal sevenths of its own window."),
+        ("layout: by pace / by family", "By pace: lanes grouped by window length, worst pace first. By family: one row per model family with its 5-hour and weekly windows side by side, in a fixed provider order — nothing moves between refreshes."),
         ("Stale lanes", "A lane that can't be fetched keeps its last good numbers and is marked stale with their age — never a guessed value."),
     ]
 
