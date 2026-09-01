@@ -466,7 +466,7 @@ enum Bucket: String, CaseIterable, Sendable {
     case rolling, weekly, monthly
 
     init(windowSeconds: Double) {
-        self = windowSeconds < 172_800 ? .rolling : windowSeconds < 1_728_000 ? .weekly : .monthly
+        self = windowSeconds < 86_400 ? .rolling : windowSeconds < 1_728_000 ? .weekly : .monthly
     }
 
     var title: String {

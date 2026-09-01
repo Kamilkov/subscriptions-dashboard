@@ -973,7 +973,7 @@ function relLabel(sec) {
   const a = Math.abs(sec), v = a < 3600 ? Math.round(a / 60) + "m" : Math.round(a / 3600) + "h";
   return sec < 0 ? v + " ago" : "in " + v;
 }
-function bucketOf(ws) { return ws < 172800 ? "rolling" : ws < 1728000 ? "weekly" : "monthly"; }
+function bucketOf(ws) { return ws < 86400 ? "rolling" : ws < 1728000 ? "weekly" : "monthly"; }
 function edgeLabel(key, epoch) {
   const d = new Date(epoch * 1000);
   if (key === "rolling") return relLabel(epoch - Date.now() / 1000);

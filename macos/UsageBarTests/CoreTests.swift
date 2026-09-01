@@ -290,6 +290,7 @@ final class CoreTests: XCTestCase {
 
     func testBucketThresholds() {
         XCTAssertEqual(Bucket(windowSeconds: 18000), .rolling)
+        XCTAssertEqual(Bucket(windowSeconds: 86_400), .weekly)  // daily meter must not stretch the 5-hour axis
         XCTAssertEqual(Bucket(windowSeconds: 604800), .weekly)
         XCTAssertEqual(Bucket(windowSeconds: 2_592_000), .monthly)
     }
