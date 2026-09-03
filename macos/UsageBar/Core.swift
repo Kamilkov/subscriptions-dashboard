@@ -51,8 +51,9 @@ struct Limit: Equatable, Sendable {
 
 func paceBadge(usagePct: Double, elapsed: Double) -> Pace {
     // Burn rate relative to the rate that exactly consumes the window.
-    if elapsed < 2.0 { return .on }  // first ~3h of a week: one session skews the ratio
-    let rate = usagePct / elapsed
+    // Floor elapsed at 2% (~3h of a week) so one early session can't skew the
+    // ratio — but a runaway session still reads OVER.
+    let rate = usagePct / max(elapsed, 2.0)
     if rate < 0.85 { return .under }
     if rate > 1.15 { return .over }
     return .on

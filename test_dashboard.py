@@ -302,6 +302,12 @@ class TestWindowMath(unittest.TestCase):
         self.assertEqual(dashboard.pace_badge(53.0, 50.0), "on")  # 1.06x
         self.assertEqual(dashboard.pace_badge(60.0, 50.0), "over")  # 1.20x
 
+    def test_pace_badge_early_window_floor(self):
+        import dashboard
+        # 8% in the first 40 min of a week (the Fable case) is a runaway session, not ON PACE.
+        self.assertEqual(dashboard.pace_badge(8.0, 0.4), "over")
+        self.assertEqual(dashboard.pace_badge(0.0, 0.4), "under")
+
     def test_pace_badge_is_ratio_not_points(self):
         import dashboard
         # 2pp gap early in the window is a 1.3x burn — over pace, not "on".
@@ -311,9 +317,10 @@ class TestWindowMath(unittest.TestCase):
 
     def test_pace_badge_early_window_guard(self):
         import dashboard
-        # Below 2% elapsed the ratio is noise (and 0 elapsed would divide by zero).
-        self.assertEqual(dashboard.pace_badge(5.0, 0.0), "on")
-        self.assertEqual(dashboard.pace_badge(5.0, 1.9), "on")
+        # Below 2% elapsed the rate is measured against 2% (0 elapsed must not divide by zero).
+        self.assertEqual(dashboard.pace_badge(2.0, 0.0), "on")
+        self.assertEqual(dashboard.pace_badge(2.0, 1.9), "on")
+        self.assertEqual(dashboard.pace_badge(5.0, 0.0), "over")  # 2.5x
 
 
 import tempfile

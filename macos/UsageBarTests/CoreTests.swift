@@ -245,7 +245,8 @@ final class CoreTests: XCTestCase {
     // MARK: - pace
 
     func testPaceBadge() {
-        XCTAssertEqual(paceBadge(usagePct: 9, elapsed: 1.5), .on)     // early-window guard
+        XCTAssertEqual(paceBadge(usagePct: 2, elapsed: 0), .on)       // early floor: 2/2, no div-by-zero
+        XCTAssertEqual(paceBadge(usagePct: 8, elapsed: 0.4), .over)   // runaway first session
         XCTAssertEqual(paceBadge(usagePct: 10, elapsed: 50), .under)  // rate 0.2
         XCTAssertEqual(paceBadge(usagePct: 50, elapsed: 50), .on)     // rate 1.0
         XCTAssertEqual(paceBadge(usagePct: 9, elapsed: 7), .over)     // rate 1.29

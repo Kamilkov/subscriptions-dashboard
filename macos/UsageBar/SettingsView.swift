@@ -131,7 +131,7 @@ struct SettingsView: View {
     // board's "How these numbers are computed" section; edit both together.
     private static let numbers: [(String, String)] = [
         ("The bar", "Fill is % of quota used; the tick is % of the window elapsed. The whole board is that one comparison: am I burning faster than time is passing?"),
-        ("Pace badge", "Usage ÷ elapsed. UNDER below 0.85×, OVER above 1.15×, ON PACE between. The first ~2% of a window always reads ON PACE so one session can't skew the ratio."),
+        ("Pace badge", "Usage ÷ elapsed. UNDER below 0.85×, OVER above 1.15×, ON PACE between. Elapsed is floored at 2% of the window so one early session can't skew the ratio."),
         ("runs out ~…", "A trend fitted over the last 24 hours only, extrapolated forward. A lane can be UNDER for the week yet still warn — the badge looks back, the projection looks forward. If the trend lasts past the reset, it says so instead."),
         ("BLOCKED", "Shown only when the vendor reports the limit actually enforced, not merely warned. Remaining budget is shown when the vendor provides it."),
         ("Menu bar number", "Automatic picks the worst visible lane: blocked first, then over pace, then highest usage. Pin a specific lane in General."),

@@ -79,9 +79,9 @@ def pace_badge(usage_pct, elapsed):
     # Burn rate relative to the rate that exactly consumes the window. A fixed
     # percentage-point band reads "on pace" at 7% elapsed / 9% used — a 1.3x
     # burn that exhausts the week by day 5.
-    if elapsed < 2.0:  # first ~3h of a week: one session skews the ratio
-        return "on"
-    rate = usage_pct / elapsed
+    # Floor elapsed at 2% (~3h of a week) so one early session can't skew the
+    # ratio — but a runaway session still reads OVER.
+    rate = usage_pct / max(elapsed, 2.0)
     if rate < 0.85:
         return "under"
     if rate > 1.15:
@@ -863,7 +863,7 @@ footer { margin-top:14px; font:11px/1.4 var(--mono); color:var(--faint); }
     <dt>The bar</dt><dd>Fill is % of quota used; the tick is % of the window elapsed.
       The whole board is that one comparison: am I burning faster than time is passing?</dd>
     <dt>Pace badge</dt><dd>Usage &divide; elapsed. UNDER below 0.85&times;, OVER above 1.15&times;,
-      ON PACE between. The first ~2% of a window always reads ON PACE so one session can't skew the ratio.</dd>
+      ON PACE between. Elapsed is floored at 2% of the window so one early session can't skew the ratio.</dd>
     <dt>runs out ~&hellip;</dt><dd>A trend fitted over the last 24 hours only, extrapolated forward.
       A lane can be UNDER for the week yet still warn &mdash; the badge looks back, the projection
       looks forward. If the trend lasts past the reset, it says so instead.</dd>
