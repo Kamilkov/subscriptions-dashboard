@@ -38,6 +38,19 @@ class TestParsers(unittest.TestCase):
                                              "resets_at": "2026-07-16T07:00:00.009069+00:00",
                                              "blocked": False})
         self.assertEqual(out["weekly_scoped"]["pct"], 46.0)
+
+    def test_parse_claude_null_weekly_reset(self):
+        """Weekly resets_at: null -> fall back to the top-level seven_day reset."""
+        import dashboard
+        out = dashboard.parse_claude({
+            "seven_day": {"resets_at": "2026-09-10T07:00:00+00:00"},
+            "limits": [{"kind": "weekly_all", "group": "weekly", "percent": 0,
+                        "resets_at": None},
+                       {"kind": "weekly_scoped", "group": "weekly", "percent": 0,
+                        "resets_at": None,
+                        "scope": {"model": {"display_name": "Fable"}}}]})
+        self.assertEqual(out["weekly_all"]["resets_at"], "2026-09-10T07:00:00+00:00")
+        self.assertEqual(out["weekly_scoped"]["name"], "Weekly - Fable")
         # Vendor display name carried through from the scope object.
         self.assertEqual(out["weekly_scoped"]["name"], "Weekly - Fable")
 
@@ -76,12 +89,14 @@ class TestParsers(unittest.TestCase):
         next(e for e in p["limits"] if e["kind"] == "session")["resets_at"] = None
         self.assertNotIn("session", dashboard.parse_claude(p))
 
-    def test_parse_claude_ignores_scoped_between_windows(self):
+    def test_parse_claude_scoped_null_reset_uses_weekly_boundary(self):
+        """A scoped lane with no reset of its own shares the weekly boundary
+        rather than vanishing from the board."""
         import dashboard
         p = load_fixture("claude_usage.json")
         next(e for e in p["limits"] if e["kind"] == "weekly_scoped")["resets_at"] = None
         out = dashboard.parse_claude(p)
-        self.assertNotIn("weekly_scoped", out)
+        self.assertEqual(out["weekly_scoped"]["resets_at"], p["seven_day"]["resets_at"])
 
     def test_parse_claude_missing_weekly_raises_parse_error(self):
         import dashboard

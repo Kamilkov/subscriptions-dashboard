@@ -96,6 +96,15 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(laneDisplay("weekly_scoped", out["weekly_scoped"]!), "Weekly - Opus and above")
     }
 
+    func testClaudeNullWeeklyResetFallsBackToSevenDay() throws {
+        // Weekly lanes have come back with resets_at: null; the top-level
+        // seven_day reset stands in so the lane still shows at 0%.
+        let payload = #"{"seven_day":{"resets_at":"2026-09-10T07:00:00Z"},"limits":[{"kind":"weekly_all","group":"weekly","percent":0,"resets_at":null},{"kind":"weekly_scoped","group":"weekly","percent":0,"resets_at":null,"scope":{"model":{"display_name":"Fable"}}}]}"#
+        let out = try parseClaude(Data(payload.utf8))
+        XCTAssertEqual(out["weekly_all"]?.resetEpoch, isoToEpoch("2026-09-10T07:00:00Z"))
+        XCTAssertEqual(out["weekly_scoped"]?.name, "Weekly - Fable")
+    }
+
     func testParseClaudeBlockedSeverity() throws {
         let payload = #"{"limits": [{"kind":"weekly_all","group":"weekly","percent":100,"severity":"exceeded","resets_at":"2026-07-16T07:00:00Z"}]}"#
         let out = try parseClaude(Data(payload.utf8))

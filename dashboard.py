@@ -109,6 +109,10 @@ def _severity_blocked(entry):
 def parse_claude(payload):
     """Extract the 5-hour session and weekly limits from Claude usage."""
     out = {}
+    # Weekly entries have come back with resets_at: null while the top-level
+    # seven_day block still carries the reset — fall back to it, else the lane
+    # silently disappears (or weekly_all raises) instead of showing 0%.
+    week_reset = (payload.get("seven_day") or {}).get("resets_at")
     try:
         for entry in payload["limits"]:
             if (entry.get("group") == "session" and entry.get("kind") == "session"
@@ -121,9 +125,10 @@ def parse_claude(payload):
             if entry.get("group") != "weekly":
                 continue
             kind = entry.get("kind")
-            if kind in ("weekly_all", "weekly_scoped") and entry.get("resets_at"):
+            resets = entry.get("resets_at") or week_reset
+            if kind in ("weekly_all", "weekly_scoped") and resets:
                 out[kind] = {"pct": _num(entry["percent"]),
-                             "resets_at": entry["resets_at"],
+                             "resets_at": resets,
                              "blocked": _severity_blocked(entry)}
                 # Vendor-provided lane name when present ("Fable"); scope has
                 # been a bare string ("opus") and an object — tolerate both,

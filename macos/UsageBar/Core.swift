@@ -146,6 +146,11 @@ func parseClaude(_ data: Data) throws -> [String: Limit] {
         throw FetchError.parse("claude payload: no limits array")
     }
     var out: [String: Limit] = [:]
+    // Weekly entries have come back with resets_at: null while the top-level
+    // seven_day block still carries the reset — fall back to it, else the lane
+    // silently disappears (or weekly_all throws) instead of showing 0%.
+    let weekReset = ((payload["seven_day"] as? [String: Any])?["resets_at"] as? String)
+        .flatMap(isoToEpoch)
     for entry in limits {
         let group = entry["group"] as? String
         let kind = entry["kind"] as? String
@@ -157,7 +162,8 @@ func parseClaude(_ data: Data) throws -> [String: Limit] {
             continue
         }
         guard group == "weekly", let k = kind, k == "weekly_all" || k == "weekly_scoped",
-              let resets = entry["resets_at"] as? String, let epoch = isoToEpoch(resets) else { continue }
+              let epoch = (entry["resets_at"] as? String).flatMap(isoToEpoch) ?? weekReset
+        else { continue }
         // Vendor lane name when present ("Fable"); scope has been a bare
         // string ("opus") and an object — tolerate both, nil -> static label.
         var name: String? = nil
