@@ -163,8 +163,10 @@ def parse_cursor(payload):
     autoPercentUsed (Cursor models) and apiPercentUsed (other models).
 
     totalSpend/limit is NOT a usage meter — totalSpend includes free
-    bonusSpend, so spend/limit overstates (e.g. 210% while genuinely at
-    7%/44%); it and totalPercentUsed are deliberately ignored."""
+    bonusSpend, so spend/limit overstates whenever a bonus is in play (seen
+    at 210% while genuinely at 7%/44%). It happens to agree with the meters
+    in a cycle with no bonus (remainingBonus: false), which is not a reason
+    to trust it; it and totalPercentUsed stay deliberately ignored."""
     try:
         plan = payload["planUsage"]
         start = _num(payload["billingCycleStart"]) / 1000.0

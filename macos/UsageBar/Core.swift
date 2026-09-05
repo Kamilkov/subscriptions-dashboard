@@ -249,7 +249,9 @@ func parseCodex(_ data: Data) throws -> [String: Limit] {
 func parseCursor(_ data: Data) throws -> [String: Limit] {
     // The two monthly meters Cursor's own dashboard shows. totalSpend/limit is
     // NOT a usage meter — totalSpend includes free bonusSpend, so spend/limit
-    // overstates; it and totalPercentUsed are deliberately ignored.
+    // overstates whenever a bonus is in play. It happens to agree with the
+    // meters in a bonus-free cycle, which is not a reason to trust it; it and
+    // totalPercentUsed stay deliberately ignored.
     let payload = try jsonObject(data)
     guard let plan = payload["planUsage"] as? [String: Any],
           let startMs = num(payload["billingCycleStart"]),
