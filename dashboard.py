@@ -164,9 +164,9 @@ def parse_cursor(payload):
 
     totalSpend/limit is NOT a usage meter — totalSpend includes free
     bonusSpend, so spend/limit overstates whenever a bonus is in play (seen
-    at 210% while genuinely at 7%/44%). It happens to agree with the meters
-    in a cycle with no bonus (remainingBonus: false), which is not a reason
-    to trust it; it and totalPercentUsed stay deliberately ignored."""
+    at 210% while genuinely at 7%/44%). Even bonus-free it diverges: 37%
+    spend vs 1.6%/0% meters (2026-10, likely Grok Bot spend outside both
+    pools). It and totalPercentUsed stay deliberately ignored."""
     try:
         plan = payload["planUsage"]
         start = _num(payload["billingCycleStart"]) / 1000.0
