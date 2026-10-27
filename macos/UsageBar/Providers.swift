@@ -1,5 +1,6 @@
 // Credential lookup + vendor fetches. Tokens are read at fetch time and never
 // stored or logged (same contract as dashboard.py).
+import CommonCrypto
 import Foundation
 import Security
 import SQLite3
@@ -148,7 +149,8 @@ enum Providers {
         guard sqlite3_step(stmt) == SQLITE_ROW, let cstr = sqlite3_column_text(stmt, 0) else {
             throw FetchError.auth("cursor access token missing")
         }
-        let tok = String(cString: cstr).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+        let tok = try decryptCursorToken(
+            String(cString: cstr).trimmingCharacters(in: CharacterSet(charactersIn: "\"")))
         // uid comes from the JWT's sub claim ("provider|user_xxx").
         let parts = tok.split(separator: ".")
         guard parts.count >= 2, let claims = decodeBase64URLJSON(String(parts[1])),
@@ -157,6 +159,46 @@ enum Providers {
             throw FetchError.auth("cursor token is not a decodable JWT")
         }
         return (uid, tok)
+    }
+
+    /// Cursor 3.27+ stores the token as "cursor-safe-storage:v1:<b64>", an
+    /// Electron safeStorage blob: "v10" + AES-128-CBC, key = PBKDF2-SHA1(Keychain
+    /// "Cursor Safe Storage" password, "saltysalt", 1003), IV = 16 spaces.
+    /// Plain JWTs pass through. Password read via /usr/bin/security, as for Claude.
+    static func decryptCursorToken(_ tok: String,
+                                   password: () -> String? = { securityPassword("Cursor Safe Storage") }) throws -> String {
+        let prefix = "cursor-safe-storage:v1:"
+        guard tok.hasPrefix(prefix) else { return tok }
+        let fail = FetchError.auth("cursor token decrypt failed (Keychain \"Cursor Safe Storage\")")
+        guard let blob = Data(base64Encoded: String(tok.dropFirst(prefix.count))),
+              blob.prefix(3) == Data("v10".utf8), let pw = password(), !pw.isEmpty else { throw fail }
+        var key = [UInt8](repeating: 0, count: kCCKeySizeAES128)
+        let salt = Array("saltysalt".utf8)
+        guard CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), pw, pw.utf8.count, salt, salt.count,
+                                   CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1), 1003,
+                                   &key, key.count) == kCCSuccess else { throw fail }
+        let ct = [UInt8](blob.dropFirst(3))
+        let iv = [UInt8](repeating: 0x20, count: kCCBlockSizeAES128)
+        var out = [UInt8](repeating: 0, count: ct.count + kCCBlockSizeAES128)
+        var n = 0
+        guard CCCrypt(CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding),
+                      key, key.count, iv, ct, ct.count, &out, out.count, &n) == kCCSuccess,
+              let jwt = String(bytes: out.prefix(n), encoding: .utf8) else { throw fail }
+        return jwt
+    }
+
+    static func securityPassword(_ service: String) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["find-generic-password", "-s", service, "-w"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = Pipe()
+        guard (try? p.run()) != nil else { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func decodeBase64URLJSON(_ s: String) -> [String: Any]? {

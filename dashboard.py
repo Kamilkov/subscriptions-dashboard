@@ -6,6 +6,7 @@ Stdlib only. Serves 127.0.0.1:8787. Tokens are never stored or logged.
 """
 import argparse
 import base64
+import hashlib
 import json
 import re
 import sqlite3
@@ -295,7 +296,32 @@ def fetch_antigravity(discover=None, post=None):
     raise last_err or FetchError("auth", "antigravity: no server answered")
 
 
-def read_cursor_session(db_path=None):
+def decrypt_cursor_token(tok, run=subprocess.run):
+    """Cursor 3.27+ stores the token as "cursor-safe-storage:v1:<b64>", an
+    Electron safeStorage blob: "v10" + AES-128-CBC, key = PBKDF2-SHA1(Keychain
+    "Cursor Safe Storage" password, "saltysalt", 1003), IV = 16 spaces.
+    Stdlib has no AES, so openssl does the cipher. Plain JWTs pass through."""
+    prefix = "cursor-safe-storage:v1:"
+    if not tok.startswith(prefix):
+        return tok
+    try:
+        blob = base64.b64decode(tok[len(prefix):])
+        cp = run(["security", "find-generic-password", "-s", "Cursor Safe Storage", "-w"],
+                 capture_output=True, text=True, timeout=30)
+        pw = (cp.stdout or "").strip()
+        if cp.returncode != 0 or not pw or blob[:3] != b"v10":
+            raise ValueError
+        key = hashlib.pbkdf2_hmac("sha1", pw.encode(), b"saltysalt", 1003, 16)
+        cp = run(["openssl", "enc", "-d", "-aes-128-cbc", "-K", key.hex(), "-iv", "20" * 16],
+                 input=blob[3:], capture_output=True, timeout=10)
+        if cp.returncode != 0:
+            raise ValueError
+        return cp.stdout.decode()
+    except Exception:
+        raise FetchError("auth", "cursor token decrypt failed (Keychain \"Cursor Safe Storage\")")
+
+
+def read_cursor_session(db_path=None, run=subprocess.run):
     """(user_id, jwt) from Cursor's state DB, opened strictly read-only."""
     if db_path is None:
         db_path = CURSOR_DB
@@ -311,7 +337,7 @@ def read_cursor_session(db_path=None):
     if not row or not row[0]:
         raise FetchError("auth", "cursor access token missing")
     tok = row[0].decode() if isinstance(row[0], bytes) else row[0]
-    tok = tok.strip('"')
+    tok = decrypt_cursor_token(tok.strip('"'), run)
     try:
         part = tok.split(".")[1]
         claims = json.loads(base64.urlsafe_b64decode(part + "=" * (-len(part) % 4)))

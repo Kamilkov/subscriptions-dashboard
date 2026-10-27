@@ -771,6 +771,29 @@ class TestCredentialsAndFetch(unittest.TestCase):
                 dashboard.read_cursor_session(db_path=db)
             self.assertEqual(cm.exception.category, "auth")
 
+    def test_read_cursor_session_decrypts_safe_storage_token(self):
+        import base64, hashlib, subprocess, types, dashboard
+        payload = base64.urlsafe_b64encode(
+            json.dumps({"sub": "auth0|user_cursor123"}).encode()).rstrip(b"=").decode()
+        jwt = f"eyJhbGciOiJSUzI1NiJ9.{payload}.sig"
+        key = hashlib.pbkdf2_hmac("sha1", b"pw", b"saltysalt", 1003, 16)
+        ct = subprocess.run(["openssl", "enc", "-aes-128-cbc", "-K", key.hex(), "-iv", "20" * 16],
+                            input=jwt.encode(), capture_output=True, check=True).stdout
+        token = "cursor-safe-storage:v1:" + base64.b64encode(b"v10" + ct).decode()
+
+        def run(cmd, **kw):
+            if cmd[0] == "security":
+                return types.SimpleNamespace(returncode=0, stdout="pw\n")
+            return subprocess.run(cmd, **kw)
+        with tempfile.TemporaryDirectory() as d:
+            db = self._cursor_db(d, token=token)
+            self.assertEqual(dashboard.read_cursor_session(db_path=db, run=run),
+                             ("user_cursor123", jwt))
+            bad = lambda cmd, **kw: types.SimpleNamespace(returncode=44, stdout="")
+            with self.assertRaises(dashboard.FetchError) as cm:
+                dashboard.read_cursor_session(db_path=db, run=bad)
+            self.assertEqual(cm.exception.category, "auth")
+
     def test_fetch_cursor_wires_cookie_and_parser(self):
         import dashboard
         seen = {}

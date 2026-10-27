@@ -167,6 +167,15 @@ final class CoreTests: XCTestCase {
         XCTAssertThrowsError(try parseCursor(Data(payload.utf8)))
     }
 
+    func testDecryptCursorSafeStorageToken() throws {
+        // Generated with openssl from password "pw" (see dashboard.decrypt_cursor_token).
+        let enc = "cursor-safe-storage:v1:djEwSLHeB5VghwTuxEaMX9JEx7Kq5l7sxxFrmLwLwS3g87+npTaLubly2KEKppMPGYVojPJ62MudhFsV66HWp5qwzQmWkxVWTwVxZD6VcZ5kzPk="
+        XCTAssertEqual(try Providers.decryptCursorToken(enc, password: { "pw" }),
+                       "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhdXRoMHx1c2VyX2N1cnNvcjEyMyJ9.sig")
+        XCTAssertEqual(try Providers.decryptCursorToken("a.b.c", password: { nil }), "a.b.c")
+        XCTAssertThrowsError(try Providers.decryptCursorToken(enc, password: { nil }))
+    }
+
     func testParseCopilot() throws {
         let out = try parseCopilot(fixture("copilot_user"))
         XCTAssertEqual(Set(out.keys), ["chat", "completions"])  // has_quota=false skipped
