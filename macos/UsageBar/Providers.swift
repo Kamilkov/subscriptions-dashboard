@@ -261,12 +261,18 @@ enum Providers {
     static func discoverAntigravityServers() throws -> (ports: [Int], tokens: [String]) {
         var pids: [String] = [], tokens: [String] = []
         for line in runLines("/bin/ps", ["-xo", "pid=,args="])
-        where line.contains("language_server_macos") {
+        // Antigravity IDE (Nov 2026) replaced language_server_macos with
+        // `~/.gemini/bin/agy --hub --csrf_token=X`; same RPC on its hub port.
+        where line.contains("language_server_macos") || line.contains("/bin/agy ") {
             let parts = line.split(separator: " ").map(String.init)
             guard let pid = parts.first else { continue }
             pids.append(pid)
-            if let i = parts.firstIndex(of: "--csrf_token"), i + 1 < parts.count {
-                tokens.append(parts[i + 1])
+            for (i, a) in parts.enumerated() {
+                if a == "--csrf_token", i + 1 < parts.count {
+                    tokens.append(parts[i + 1])
+                } else if a.hasPrefix("--csrf_token=") {
+                    tokens.append(String(a.dropFirst("--csrf_token=".count)))
+                }
             }
         }
         guard !pids.isEmpty else { throw FetchError.auth("antigravity not running") }

@@ -243,14 +243,17 @@ def discover_antigravity_servers(run=None):
         raise FetchError("parse", f"antigravity ps failed: {e.__class__.__name__}")
     pids, tokens = [], []
     for line in ps.splitlines():
-        if "language_server_macos" not in line:
+        # Antigravity IDE (Nov 2026) replaced language_server_macos with
+        # `~/.gemini/bin/agy --hub --csrf_token=X`; same RPC on its hub port.
+        if "language_server_macos" not in line and "/bin/agy " not in line:
             continue
         parts = line.split()
         pids.append(parts[0])
-        if "--csrf_token" in parts:
-            i = parts.index("--csrf_token")
-            if i + 1 < len(parts):
+        for i, a in enumerate(parts):
+            if a == "--csrf_token" and i + 1 < len(parts):
                 tokens.append(parts[i + 1])
+            elif a.startswith("--csrf_token="):
+                tokens.append(a.split("=", 1)[1])
     if not pids:
         raise FetchError("auth", "antigravity not running")
     ports = set()

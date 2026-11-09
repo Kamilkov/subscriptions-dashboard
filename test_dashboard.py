@@ -650,6 +650,19 @@ class TestCredentialsAndFetch(unittest.TestCase):
         self.assertIn("/exa.language_server_pb.LanguageServerService"
                       "/RetrieveUserQuotaSummary", seen[0][0])
 
+    def test_discover_antigravity_finds_agy_hub(self):
+        import dashboard
+        from types import SimpleNamespace as NS
+
+        def fake_run(cmd, **kw):
+            if cmd[0] == "ps":
+                return NS(stdout="  18475 /Users/x/.gemini/bin/agy --hub --hub-port=58853 "
+                                 "--csrf_token=tok-agy --add-dir=/tmp\n  9 /bin/zsh\n")
+            return NS(stdout="agy 18475 x 11u IPv4 0x1 0t0 TCP 127.0.0.1:58853 (LISTEN)\n")
+
+        self.assertEqual(dashboard.discover_antigravity_servers(run=fake_run),
+                         ([58853], ["tok-agy"]))
+
     def test_fetch_antigravity_not_running_is_auth_error(self):
         import dashboard
 
