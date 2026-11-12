@@ -256,8 +256,7 @@ func parseCursor(_ data: Data) throws -> [String: Limit] {
     guard let plan = payload["planUsage"] as? [String: Any],
           let startMs = num(payload["billingCycleStart"]),
           let endMs = num(payload["billingCycleEnd"]),
-          let auto = num(plan["autoPercentUsed"]),
-          let api = num(plan["apiPercentUsed"]) else {
+          let auto = num(plan["autoPercentUsed"]) else {
         throw FetchError.parse("cursor payload: missing fields")
     }
     let start = startMs / 1000, end = endMs / 1000
@@ -266,7 +265,16 @@ func parseCursor(_ data: Data) throws -> [String: Limit] {
         Limit(pct: (pct * 10).rounded() / 10, resetEpoch: end, windowSeconds: end - start,
               blocked: pct >= 100.0)
     }
-    return ["monthly_auto": meter(auto), "monthly_api": meter(api)]
+    // apiPercentUsed went missing from planUsage in 2026-11 (only auto/total
+    // left) — drop that meter rather than fail or zero-fill.
+    var out = ["monthly_auto": meter(auto)]
+    if plan["apiPercentUsed"] != nil {
+        guard let api = num(plan["apiPercentUsed"]) else {
+            throw FetchError.parse("cursor payload: missing fields")
+        }
+        out["monthly_api"] = meter(api)
+    }
+    return out
 }
 
 // Grok Bot weekly meter from get-sand-usage-status ("sand" is Cursor's

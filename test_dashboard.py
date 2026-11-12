@@ -228,6 +228,16 @@ class TestParsers(unittest.TestCase):
         self.assertTrue(out["monthly_api"]["blocked"])
         self.assertFalse(out["monthly_auto"]["blocked"])
 
+    def test_parse_cursor_no_api_meter(self):
+        import dashboard
+        # 2026-11: planUsage arrived without apiPercentUsed (only auto/total).
+        # The absent meter is dropped, not zero-filled, and auto still renders.
+        p = load_fixture("cursor_usage.json")
+        del p["planUsage"]["apiPercentUsed"]
+        out = dashboard.parse_cursor(p)
+        self.assertEqual(sorted(out), ["monthly_auto"])
+        self.assertEqual(out["monthly_auto"]["pct"], 7.4)
+
     def test_payload_shape_and_drift(self):
         import dashboard, tempfile
         shape = dashboard.payload_shape({"b": {"y": 1, "x": {"deep": 1}}, "a": [1, 2], "t": "tok"})

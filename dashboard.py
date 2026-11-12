@@ -173,7 +173,9 @@ def parse_cursor(payload):
         start = _num(payload["billingCycleStart"]) / 1000.0
         end = _num(payload["billingCycleEnd"]) / 1000.0
         auto = _num(plan["autoPercentUsed"])
-        api = _num(plan["apiPercentUsed"])
+        # apiPercentUsed went missing from planUsage in 2026-11 (only
+        # auto/total left) — drop that meter rather than fail or zero-fill.
+        api = _num(plan["apiPercentUsed"]) if "apiPercentUsed" in plan else None
     except (KeyError, TypeError, ValueError) as e:
         raise FetchError("parse", f"cursor payload: {e.__class__.__name__}")
     if end <= start:
@@ -181,7 +183,10 @@ def parse_cursor(payload):
     def meter(pct):
         return {"pct": round(pct, 1), "reset_at": end, "window_seconds": end - start,
                 "blocked": pct >= 100.0}
-    return {"monthly_auto": meter(auto), "monthly_api": meter(api)}
+    out = {"monthly_auto": meter(auto)}
+    if api is not None:
+        out["monthly_api"] = meter(api)
+    return out
 
 
 def parse_cursor_grok(payload):

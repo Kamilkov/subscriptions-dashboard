@@ -130,6 +130,13 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(out["rolling"]?.blocked, false)
     }
 
+    func testParseCursorNoApiMeter() throws {
+        // 2026-11: planUsage arrived without apiPercentUsed — drop that meter.
+        let payload = #"{"billingCycleStart": "1000", "billingCycleEnd": "2000", "planUsage": {"autoPercentUsed": 0, "totalPercentUsed": 0}}"#
+        let out = try parseCursor(Data(payload.utf8))
+        XCTAssertEqual(Array(out.keys), ["monthly_auto"])
+    }
+
     func testParseCursor() throws {
         let out = try parseCursor(fixture("cursor_usage"))
         // autoPercentUsed / apiPercentUsed, NOT totalSpend/limit (bonus-inflated).
