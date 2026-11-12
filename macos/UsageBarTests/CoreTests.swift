@@ -135,6 +135,15 @@ final class CoreTests: XCTestCase {
         let payload = #"{"billingCycleStart": "1000", "billingCycleEnd": "2000", "planUsage": {"autoPercentUsed": 0, "totalPercentUsed": 0}}"#
         let out = try parseCursor(Data(payload.utf8))
         XCTAssertEqual(Array(out.keys), ["monthly_auto"])
+        XCTAssertNil(out["monthly_auto"]?.name)  // not a 7-day cycle: static label
+    }
+
+    func testParseCursorWeeklyCycleName() throws {
+        // 2026-11: billing cycle became 7 days; the label follows the window.
+        let payload = #"{"billingCycleStart": "0", "billingCycleEnd": "604800000", "planUsage": {"autoPercentUsed": 1, "apiPercentUsed": 2}}"#
+        let out = try parseCursor(Data(payload.utf8))
+        XCTAssertEqual(out["monthly_auto"]?.name, "Weekly - Cursor models")
+        XCTAssertEqual(out["monthly_api"]?.name, "Weekly - other models")
     }
 
     func testParseCursor() throws {

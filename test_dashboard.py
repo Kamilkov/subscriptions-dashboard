@@ -237,6 +237,16 @@ class TestParsers(unittest.TestCase):
         out = dashboard.parse_cursor(p)
         self.assertEqual(sorted(out), ["monthly_auto"])
         self.assertEqual(out["monthly_auto"]["pct"], 7.4)
+        self.assertNotIn("name", out["monthly_auto"])  # 30-day cycle: static label
+
+    def test_parse_cursor_weekly_cycle_name(self):
+        import dashboard
+        # 2026-11: billing cycle became 7 days; the label follows the window.
+        p = load_fixture("cursor_usage.json")
+        p["billingCycleEnd"] = str(int(p["billingCycleStart"]) + 7 * 86400 * 1000)
+        out = dashboard.parse_cursor(p)
+        self.assertEqual(out["monthly_auto"]["name"], "Weekly - Cursor models")
+        self.assertEqual(out["monthly_api"]["name"], "Weekly - other models")
 
     def test_payload_shape_and_drift(self):
         import dashboard, tempfile

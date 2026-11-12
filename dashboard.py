@@ -186,6 +186,12 @@ def parse_cursor(payload):
     out = {"monthly_auto": meter(auto)}
     if api is not None:
         out["monthly_api"] = meter(api)
+    # The cycle went 7-day in 2026-11; keys stay monthly_* (pins, history),
+    # only the display name follows the real window.
+    if abs(end - start - 7 * 86400) < 86400:
+        for key, what in (("monthly_auto", "Cursor models"), ("monthly_api", "other models")):
+            if key in out:
+                out[key]["name"] = f"Weekly - {what}"
     return out
 
 
@@ -1481,7 +1487,7 @@ const NAMES = {weekly_all:"Weekly - all models", monthly_auto:"Monthly - Cursor 
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function shortDate(ep){return new Date(ep*1000).toLocaleDateString(undefined,{day:"numeric",month:"short"});}
 function card(l, now){
-  const name = NAMES[l.label] || l.name;
+  const name = (l.name !== l.label && l.name) || NAMES[l.label] || l.name;  // vendor/parser name wins
   let cols = "", dates = "";
   for (const w of l.windows){
     const open = w.reset > now;                       // still-running window: partial peak

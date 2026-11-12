@@ -261,18 +261,21 @@ func parseCursor(_ data: Data) throws -> [String: Limit] {
     }
     let start = startMs / 1000, end = endMs / 1000
     guard end > start else { throw FetchError.parse("cursor payload: bad billing cycle") }
-    func meter(_ pct: Double) -> Limit {
+    // The cycle went 7-day in 2026-11; keys stay monthly_* (pins, history),
+    // only the display name follows the real window.
+    let weekly = abs(end - start - 7 * 86400) < 86400
+    func meter(_ pct: Double, _ what: String) -> Limit {
         Limit(pct: (pct * 10).rounded() / 10, resetEpoch: end, windowSeconds: end - start,
-              blocked: pct >= 100.0)
+              blocked: pct >= 100.0, name: weekly ? "Weekly - \(what)" : nil)
     }
     // apiPercentUsed went missing from planUsage in 2026-11 (only auto/total
     // left) — drop that meter rather than fail or zero-fill.
-    var out = ["monthly_auto": meter(auto)]
+    var out = ["monthly_auto": meter(auto, "Cursor models")]
     if plan["apiPercentUsed"] != nil {
         guard let api = num(plan["apiPercentUsed"]) else {
             throw FetchError.parse("cursor payload: missing fields")
         }
-        out["monthly_api"] = meter(api)
+        out["monthly_api"] = meter(api, "other models")
     }
     return out
 }
